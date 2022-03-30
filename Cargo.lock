@@ -1422,7 +1422,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sysinfo 0.20.2",
+ "sysinfo 0.23.6",
  "tar",
  "tempfile",
  "thiserror",
@@ -2796,9 +2796,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.101"
+version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb00336871be5ed2c8ed44b60ae9959dc5b9f08539422ed43f09e34ecaeba21"
+checksum = "efaa7b300f3b5fe8eb6bf21ce3895e1751d9665086af2d64b42f19701015ff4f"
 
 [[package]]
 name = "libgit2-sys"
@@ -5327,9 +5327,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.20.2"
+version = "0.23.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42ef9905d4f98c059046037078f070e66de0f5ac69e5bb63f6bf805b570b3b51"
+checksum = "5f3c0db8e08e06cfd352a043bd0143498fb7d42783a6e941da83b55464eb27d2"
 dependencies = [
  "cfg-if 1.0.0",
  "core-foundation-sys",
