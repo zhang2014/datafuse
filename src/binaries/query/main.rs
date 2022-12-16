@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::env;
+use std::time::Duration;
 
 use common_base::runtime::Runtime;
 use common_base::runtime::GLOBAL_MEM_STAT;
@@ -68,6 +69,14 @@ async fn main_entrypoint() -> Result<()> {
     }
     // Make sure global services have been inited.
     GlobalServices::init(conf.clone()).await?;
+
+    common_base::base::tokio::spawn(async {
+        loop {
+            info!("Global memory usage {:?}", GLOBAL_MEM_STAT.get_memory_usage());
+            common_base::base::tokio::time::sleep(Duration::from_secs(3))
+                .await;
+        }
+    });
 
     if conf.query.max_memory_limit_enabled {
         let size = conf.query.max_server_memory_usage as i64;
@@ -263,7 +272,7 @@ async fn main_entrypoint() -> Result<()> {
                 "{}:{}",
                 conf.query.clickhouse_http_handler_host, conf.query.clickhouse_http_handler_port
             )
-            .parse()?
+                .parse()?
         )
     );
     println!("Databend HTTP");
@@ -278,7 +287,7 @@ async fn main_entrypoint() -> Result<()> {
                 "{}:{}",
                 conf.query.http_handler_host, conf.query.http_handler_port
             )
-            .parse()?
+                .parse()?
         )
     );
 
