@@ -48,7 +48,7 @@ use std::fmt::Formatter;
 use std::future::Future;
 use std::mem::take;
 use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -56,6 +56,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use bytesize::ByteSize;
+use libc::THOUSEP;
 use pin_project_lite::pin_project;
 use tracing::info;
 
@@ -63,6 +64,10 @@ use tracing::info;
 ///
 /// Every alloc/dealloc stat will be fed to this tracker.
 pub static GLOBAL_MEM_STAT: MemStat = MemStat::empty();
+
+static THREAD_COUNT: AtomicI64 = AtomicI64::new(0);
+static EMPTY_THREAD_COUNT: AtomicI64 = AtomicI64::new(0);
+static CREATE_THREAD_COUNT: AtomicI64 = AtomicI64::new(0);
 
 #[thread_local]
 static mut TRACKER: ThreadTracker = ThreadTracker::empty();
@@ -77,8 +82,8 @@ pub fn set_alloc_error_hook() {
     std::alloc::set_alloc_error_hook(|layout| {
         let _guard = LimitMemGuard::enter_unlimited();
 
-        let tracker = unsafe { &mut TRACKER };
-        let out_of_limit_desc = tracker.out_of_limit_desc.take();
+        let out_of_limit_desc = unsafe { TRACKER.out_of_limit_desc.take() };
+
         panic!(
             "{}",
             out_of_limit_desc
@@ -161,12 +166,22 @@ pub struct ThreadTracker {
     mem_stat: Option<Arc<MemStat>>,
     out_of_limit_desc: Option<String>,
 
+    need_add: bool,
+    empty_create: bool,
     /// Buffered memory allocation stat that is yet not reported to `mem_stat` and can not be seen.
     buffer: StatBuffer,
 }
 
 impl Drop for ThreadTracker {
     fn drop(&mut self) {
+        THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+
+        if self.empty_create {
+            EMPTY_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+        } else {
+            CREATE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+        }
+
         let buf = take(&mut self.buffer);
         let _ = MemStat::record_memory(&self.mem_stat, buf);
     }
@@ -181,21 +196,28 @@ impl ThreadTracker {
         Self {
             mem_stat: None,
             out_of_limit_desc: None,
+            need_add: true,
+            empty_create: true,
             buffer: StatBuffer::empty(),
         }
     }
 
     pub fn create(mem_stat: Option<Arc<MemStat>>) -> ThreadTracker {
+        THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+        CREATE_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+
         ThreadTracker {
             mem_stat,
             out_of_limit_desc: None,
+            need_add: false,
+            empty_create: false,
             buffer: Default::default(),
         }
     }
 
     /// Create a ThreadTracker sharing the same internal MemStat with the current thread.
     pub fn fork() -> ThreadTracker {
-        let mt = unsafe { TRACKER.mem_stat.clone() };
+        let mt = MemStat::current();
         ThreadTracker::create(mt)
     }
 
@@ -218,7 +240,15 @@ impl ThreadTracker {
     /// `size` is the positive number of allocated bytes.
     #[inline]
     pub fn alloc(size: i64) -> Result<(), AllocError> {
-        let tracker = unsafe { &mut TRACKER };
+        let tracker = unsafe {
+            if TRACKER.need_add {
+                THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+                EMPTY_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+                TRACKER.need_add = false;
+            }
+
+            &mut TRACKER
+        };
 
         let used = tracker.buffer.incr(size);
 
@@ -245,7 +275,15 @@ impl ThreadTracker {
     /// `size` is positive number of bytes of the memory to deallocate.
     #[inline]
     pub fn dealloc(size: i64) {
-        let tracker = unsafe { &mut TRACKER };
+        let tracker = unsafe {
+            if TRACKER.need_add {
+                THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+                EMPTY_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+                TRACKER.need_add = false;
+            }
+
+            &mut TRACKER
+        };
 
         let used = tracker.buffer.incr(-size);
 
@@ -393,6 +431,11 @@ impl MemStat {
     }
 
     pub fn log_memory_usage(&self) {
+        info!("Thread count {:?}, empty count {:?}, create count {:?}",
+            THREAD_COUNT.load(Ordering::Relaxed),
+            EMPTY_THREAD_COUNT.load(Ordering::Relaxed),
+            CREATE_THREAD_COUNT.load(Ordering::Relaxed)
+        );
         info!("Memory usage {:?}", ByteSize::b(std::cmp::max(0, self.get_memory_usage()) as u64));
     }
 
@@ -400,13 +443,13 @@ impl MemStat {
         let mem_stat = self.clone();
 
         move || {
-            let mut tracker = ThreadTracker::create(Some(mem_stat.clone()));
-            ThreadTracker::swap_with(&mut tracker);
+            // let mut tracker = ThreadTracker::create(Some(mem_stat.clone()));
+            // ThreadTracker::swap_with(&mut tracker);
 
-            debug_assert!(
-                tracker.mem_stat.is_none(),
-                "a new thread must have no tracker"
-            );
+            // debug_assert!(
+            //     tracker.mem_stat.is_none(),
+            //     "a new thread must have no tracker"
+            // );
         }
     }
 }
@@ -522,7 +565,7 @@ mod tests {
             );
 
             drop(v);
-            unsafe { &mut TRACKER.flush() };
+            // unsafe { &mut TRACKER.flush() };
 
             let used = mem_stat.get_memory_usage();
             assert_eq!(

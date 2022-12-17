@@ -48,10 +48,10 @@ impl<T> ThreadJoinHandle<T> {
 
 impl Thread {
     pub fn named_spawn<F, T>(mut name: Option<String>, f: F) -> ThreadJoinHandle<T>
-    where
-        F: FnOnce() -> T,
-        F: Send + 'static,
-        T: Send + 'static,
+        where
+            F: FnOnce() -> T,
+            F: Send + 'static,
+            T: Send + 'static,
     {
         let mut thread_builder = Builder::new();
 
@@ -73,10 +73,10 @@ impl Thread {
             None => thread_builder.spawn(f).unwrap(),
             Some(memory_tracker) => thread_builder
                 .spawn(move || {
-                    let c = MemStat::create_child(Some(memory_tracker));
-                    let mut tracker = ThreadTracker::create(Some(c));
-
-                    ThreadTracker::swap_with(&mut tracker);
+                    // let c = MemStat::create_child(Some(memory_tracker));
+                    // let mut tracker = ThreadTracker::create(Some(c));
+                    //
+                    // ThreadTracker::swap_with(&mut tracker);
 
                     f()
                 })
@@ -85,10 +85,10 @@ impl Thread {
     }
 
     pub fn spawn<F, T>(f: F) -> ThreadJoinHandle<T>
-    where
-        F: FnOnce() -> T,
-        F: Send + 'static,
-        T: Send + 'static,
+        where
+            F: FnOnce() -> T,
+            F: Send + 'static,
+            T: Send + 'static,
     {
         Self::named_spawn(None, f)
     }
