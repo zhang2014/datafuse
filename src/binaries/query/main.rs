@@ -72,7 +72,7 @@ async fn main_entrypoint() -> Result<()> {
 
     common_base::base::tokio::spawn(async {
         loop {
-            info!("Global memory usage {:?}", GLOBAL_MEM_STAT.get_memory_usage());
+            GLOBAL_MEM_STAT.log_memory_usage();
             common_base::base::tokio::time::sleep(Duration::from_secs(3))
                 .await;
         }

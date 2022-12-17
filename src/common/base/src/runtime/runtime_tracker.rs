@@ -57,6 +57,7 @@ use std::task::Poll;
 
 use bytesize::ByteSize;
 use pin_project_lite::pin_project;
+use tracing::info;
 
 /// The root tracker.
 ///
@@ -389,6 +390,10 @@ impl MemStat {
     #[inline]
     pub fn get_memory_usage(&self) -> i64 {
         self.used.load(Ordering::Relaxed)
+    }
+
+    pub fn log_memory_usage(&self) {
+        info!("Memory usage {:?}", ByteSize::b(self.get_memory_usage()));
     }
 
     pub fn on_start_thread(self: &Arc<Self>) -> impl Fn() {
