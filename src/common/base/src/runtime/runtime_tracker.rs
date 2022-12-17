@@ -393,7 +393,7 @@ impl MemStat {
     }
 
     pub fn log_memory_usage(&self) {
-        info!("Memory usage {:?}", ByteSize::b(self.get_memory_usage()));
+        info!("Memory usage {:?}", ByteSize::b(std::cmp::max(0, self.get_memory_usage()) as u64));
     }
 
     pub fn on_start_thread(self: &Arc<Self>) -> impl Fn() {
