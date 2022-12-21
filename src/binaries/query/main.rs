@@ -15,7 +15,7 @@
 use std::env;
 use std::time::Duration;
 
-use common_base::runtime::Runtime;
+use common_base::runtime::{Runtime, UnlimitedFuture};
 use common_base::runtime::GLOBAL_MEM_STAT;
 use common_base::set_alloc_error_hook;
 use common_config::Config;
@@ -202,13 +202,13 @@ async fn main_entrypoint() -> Result<()> {
         );
     }
 
-    common_base::base::tokio::spawn(async move {
+    common_base::base::tokio::spawn(UnlimitedFuture::create(async move {
         loop {
             GLOBAL_MEM_STAT.log_memory_usage();
             GLOBAL_MEM_STAT.log_peek_memory_usage();
             common_base::base::tokio::time::sleep(Duration::from_secs(3)).await;
         }
-    });
+    }));
     // Print information to users.
     println!("Databend Query");
     println!();
@@ -281,7 +281,7 @@ async fn main_entrypoint() -> Result<()> {
                 "{}:{}",
                 conf.query.clickhouse_http_handler_host, conf.query.clickhouse_http_handler_port
             )
-            .parse()?
+                .parse()?
         )
     );
     println!("Databend HTTP");
@@ -296,7 +296,7 @@ async fn main_entrypoint() -> Result<()> {
                 "{}:{}",
                 conf.query.http_handler_host, conf.query.http_handler_port
             )
-            .parse()?
+                .parse()?
         )
     );
 
