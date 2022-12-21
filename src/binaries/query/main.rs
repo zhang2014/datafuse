@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::env;
+use std::time::Duration;
 
 use common_base::runtime::Runtime;
 use common_base::runtime::GLOBAL_MEM_STAT;
@@ -201,6 +202,13 @@ async fn main_entrypoint() -> Result<()> {
         );
     }
 
+    common_base::base::tokio::spawn(async move {
+        loop {
+            GLOBAL_MEM_STAT.log_memory_usage();
+            GLOBAL_MEM_STAT.log_peek_memory_usage();
+            common_base::base::tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    });
     // Print information to users.
     println!("Databend Query");
     println!();
