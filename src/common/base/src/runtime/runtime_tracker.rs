@@ -245,7 +245,10 @@ impl ThreadTracker {
 
         let has_oom = match state_buffer.incr(size) <= MEM_STAT_BUFFER_SIZE {
             true => Ok(()),
-            false => state_buffer.flush::<true>(),
+            false => match !std::thread::panicking() && !LimitMemGuard::is_unlimited() {
+                true => state_buffer.flush::<true>(),
+                false => state_buffer.flush::<false>(),
+            },
         };
 
         if let Err(out_of_limit) = has_oom {
