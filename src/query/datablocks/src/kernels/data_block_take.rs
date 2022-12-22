@@ -67,18 +67,31 @@ impl DataBlock {
         limit: Option<usize>,
     ) -> Result<DataBlock> {
         let fields = raw.schema().fields();
-        let columns = fields
-            .iter()
-            .map(|f| {
-                let column = raw.try_column_by_name(f.name())?.clone();
-                Self::take_column_by_slices_limit(
-                    f.data_type(),
-                    &[column],
-                    &[(0, slice.0, slice.1)],
-                    limit,
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut columns = Vec::with_capacity(fields.len());
+
+        for field in fields {
+            let column = raw.try_column_by_name(field.name())?.clone();
+            columns.push(Self::take_column_by_slices_limit(
+                field.data_type(),
+                &[column],
+                &[(0, slice.0, slice.1)],
+                limit,
+            )?);
+        }
+
+        //
+        // let columns = fields
+        //     .iter()
+        //     .map(|f| {
+        //         let column = raw.try_column_by_name(f.name())?.clone();
+        //         Self::take_column_by_slices_limit(
+        //             f.data_type(),
+        //             &[column],
+        //             &[(0, slice.0, slice.1)],
+        //             limit,
+        //         )
+        //     })
+        //     .collect::<Result<Vec<_>>>()?;
         let data = DataBlock::create(raw.schema().clone(), columns);
         Ok(data)
     }
