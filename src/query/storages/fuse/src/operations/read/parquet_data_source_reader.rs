@@ -5,6 +5,7 @@ use common_pipeline_core::processors::port::OutputPort;
 use common_pipeline_core::processors::Processor;
 use common_pipeline_core::processors::processor::{Event, ProcessorPtr};
 use std::any::Any;
+use std::sync::atomic::AtomicUsize;
 use common_datablocks::DataBlock;
 use crate::io::BlockReader;
 use crate::operations::read::parquet_data_source::DataSourceMeta;
@@ -13,6 +14,7 @@ use common_pipeline_sources::processors::sources::{SyncSource, SyncSourcer};
 
 pub struct ReadParquetDataSource<const BLOCKING_IO: bool> {
     finished: bool,
+    counter: Arc<AtomicUsize>,
     ctx: Arc<dyn TableContext>,
     batch_size: usize,
     block_reader: Arc<BlockReader>,
@@ -22,11 +24,12 @@ pub struct ReadParquetDataSource<const BLOCKING_IO: bool> {
 }
 
 impl ReadParquetDataSource<true> {
-    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>) -> Result<ProcessorPtr> {
+    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>, counter: Arc<AtomicUsize>) -> Result<ProcessorPtr> {
         let batch_size = ctx.get_settings().get_storage_fetch_part_num()? as usize;
         SyncSourcer::create(ctx.clone(), output.clone(), ReadParquetDataSource::<true> {
             ctx,
             output,
+            counter,
             batch_size,
             block_reader,
             finished: false,
@@ -36,11 +39,12 @@ impl ReadParquetDataSource<true> {
 }
 
 impl ReadParquetDataSource<false> {
-    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>) -> Result<ProcessorPtr> {
+    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>, counter: Arc<AtomicUsize>) -> Result<ProcessorPtr> {
         let batch_size = ctx.get_settings().get_storage_fetch_part_num()? as usize;
         Ok(ProcessorPtr::create(Box::new(ReadParquetDataSource::<false> {
             ctx,
             output,
+            counter,
             batch_size,
             block_reader,
             finished: false,
@@ -105,11 +109,12 @@ impl Processor for ReadParquetDataSource<false> {
         for _index in 0..self.batch_size {
             if let Some(part) = self.ctx.try_get_part() {
                 parts.push(part.clone());
+                let counter = self.counter.clone();
                 let block_reader = self.block_reader.clone();
 
                 chunks.push(async move {
                     let handler = common_base::base::tokio::spawn(async move {
-                        block_reader.read_columns_data(part).await
+                        block_reader.read_columns_data(part, Some(counter)).await
                     });
                     handler.await.unwrap()
                 });

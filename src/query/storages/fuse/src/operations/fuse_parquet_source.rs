@@ -283,7 +283,7 @@ impl Processor for FuseParquetSource {
     async fn async_process(&mut self) -> Result<()> {
         match std::mem::replace(&mut self.state, State::Finish) {
             State::ReadDataPrewhere(Some(part)) => {
-                let chunks = self.prewhere_reader.read_columns_data(part.clone()).await?;
+                let chunks = self.prewhere_reader.read_columns_data(part.clone(), None).await?;
 
                 if self.prewhere_filter.is_some() {
                     self.state = State::PrewhereFilter(part, chunks);
@@ -295,7 +295,7 @@ impl Processor for FuseParquetSource {
             }
             State::ReadDataRemain(part, prewhere_data) => {
                 if let Some(remain_reader) = self.remain_reader.as_ref() {
-                    let chunks = remain_reader.read_columns_data(part.clone()).await?;
+                    let chunks = remain_reader.read_columns_data(part.clone(), None).await?;
                     self.state = State::Deserialize(part, chunks, Some(prewhere_data));
                     Ok(())
                 } else {

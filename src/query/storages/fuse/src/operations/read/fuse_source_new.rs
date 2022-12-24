@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use serde::{Deserializer, Serializer};
 use tracing::info;
 use common_catalog::plan::PartInfoPtr;
@@ -68,12 +69,14 @@ pub fn build_fuse_parquet_source_pipeline(
     max_threads: usize,
     max_io_requests: usize,
 ) -> Result<()> {
+    let fetch_count = Arc::new(AtomicUsize::new(0));
     match block_reader.support_blocking_api() {
         true => {
             pipeline.add_source(|output| ReadParquetDataSource::<true>::create(
                 ctx.clone(),
                 output,
                 block_reader.clone(),
+                fetch_count.clone(),
             ), max_threads)?;
         }
         false => {
@@ -82,6 +85,7 @@ pub fn build_fuse_parquet_source_pipeline(
                 ctx.clone(),
                 output,
                 block_reader.clone(),
+                fetch_count.clone(),
             ), max_io_requests)?;
 
             pipeline.resize(std::cmp::min(max_threads, max_io_requests))?;
@@ -92,6 +96,11 @@ pub fn build_fuse_parquet_source_pipeline(
             );
         }
     };
+
+    pipeline.set_on_finished(move |_s| {
+        info!("Request s3 counter: {}", fetch_count.load(Ordering::Relaxed));
+        Ok(())
+    });
 
     pipeline.add_transform(|transform_input, transform_output| {
         DeserializeDataTransform::create(

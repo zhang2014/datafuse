@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common_arrow::arrow::array::Array;
 use common_arrow::arrow::chunk::Chunk;
@@ -270,7 +271,7 @@ impl BlockReader {
         self.try_next_block(&mut deserializer)
     }
 
-    pub async fn read_columns_data(&self, part: PartInfoPtr) -> Result<Vec<(usize, Vec<u8>)>> {
+    pub async fn read_columns_data(&self, part: PartInfoPtr, counter: Option<Arc<AtomicUsize>>) -> Result<Vec<(usize, Vec<u8>)>> {
         let part = FusePartInfo::from_part(&part)?;
         let columns = self.projection.project_column_leaves(&self.column_leaves)?;
         let indices = Self::build_projection_indices(&columns);
@@ -279,6 +280,10 @@ impl BlockReader {
         for (index, _) in indices {
             let column_meta = part.columns_meta[&index].clone();
             let object = self.operator.object(&part.location);
+
+            if let Some(counter) = counter.as_ref() {
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
 
             join_handlers.push(async move {
                 let handler = common_base::base::tokio::spawn(
