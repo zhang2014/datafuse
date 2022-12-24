@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::io::BufReader;
+use std::sync::Arc;
+use futures_util::io::Cursor;
 
 use common_arrow::native::read::reader::PaReader;
 use common_arrow::native::read::PaReadBuf;
 use common_catalog::plan::PartInfoPtr;
-use common_exception::Result;
+use common_exception::{ErrorCode, Result};
 use opendal::Object;
+use common_base::runtime::{Runtime, ThreadPool, TrySpawn};
 
 use crate::fuse_part::FusePartInfo;
 use crate::io::BlockReader;
@@ -31,6 +34,7 @@ impl BlockReader {
     pub async fn async_read_native_columns_data(
         &self,
         part: PartInfoPtr,
+        thread_pool: Option<Arc<Runtime>>,
     ) -> Result<Vec<(usize, PaReader<Reader>)>> {
         let part = FusePartInfo::from_part(&part)?;
         let columns = self.projection.project_column_leaves(&self.column_leaves)?;
@@ -46,6 +50,7 @@ impl BlockReader {
                 column_meta.len,
                 column_meta.num_values,
                 field.data_type().clone(),
+                thread_pool.clone(),
             ));
         }
 
@@ -59,7 +64,26 @@ impl BlockReader {
         length: u64,
         rows: u64,
         data_type: common_arrow::arrow::datatypes::DataType,
+        thread_pool: Option<Arc<Runtime>>,
     ) -> Result<(usize, PaReader<Reader>)> {
+        if let Some(runtime) = thread_pool {
+            let reader = o.range_reader(offset..offset + length).await?;
+            let content_length = reader.content_length();
+            let bytes_reader = reader.into_reader();
+
+            let handler = runtime.spawn(async move {
+                let buffer = Vec::with_capacity(content_length as usize);
+                let mut bs = Cursor::new(buffer);
+                futures::io::copy(bytes_reader, &mut bs).await?;
+                Result::<Vec<u8>, ErrorCode>::Ok(bs.into_inner())
+            });
+
+            let reader = handler.await.unwrap()?;
+            let reader: Reader = Box::new(std::io::Cursor::new(reader));
+            let fuse_reader = PaReader::new(reader, data_type, rows as usize, vec![]);
+            return Ok((index, fuse_reader));
+        }
+
         let reader = o.range_read(offset..offset + length).await?;
         let reader: Reader = Box::new(std::io::Cursor::new(reader));
         let fuse_reader = PaReader::new(reader, data_type, rows as usize, vec![]);

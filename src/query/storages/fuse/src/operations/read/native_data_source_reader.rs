@@ -5,6 +5,7 @@ use common_pipeline_core::processors::port::OutputPort;
 use common_pipeline_core::processors::Processor;
 use common_pipeline_core::processors::processor::{Event, ProcessorPtr};
 use std::any::Any;
+use common_base::runtime::{Runtime, ThreadPool};
 use common_datablocks::DataBlock;
 use crate::io::BlockReader;
 use crate::operations::read::parquet_data_source::DataSourceMeta;
@@ -17,17 +18,19 @@ pub struct ReadNativeDataSource<const BLOCKING_IO: bool> {
     batch_size: usize,
     ctx: Arc<dyn TableContext>,
     block_reader: Arc<BlockReader>,
+    runtime: Arc<Runtime>,
 
     output: Arc<OutputPort>,
     output_data: Option<(Vec<PartInfoPtr>, Vec<DataChunks>)>,
 }
 
 impl ReadNativeDataSource<true> {
-    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>) -> Result<ProcessorPtr> {
+    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>, runtime: Arc<Runtime>) -> Result<ProcessorPtr> {
         let batch_size = ctx.get_settings().get_storage_fetch_part_num()? as usize;
         SyncSourcer::create(ctx.clone(), output.clone(), ReadNativeDataSource::<true> {
             ctx,
             output,
+            runtime,
             batch_size,
             block_reader,
             finished: false,
@@ -37,11 +40,12 @@ impl ReadNativeDataSource<true> {
 }
 
 impl ReadNativeDataSource<false> {
-    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>) -> Result<ProcessorPtr> {
+    pub fn create(ctx: Arc<dyn TableContext>, output: Arc<OutputPort>, block_reader: Arc<BlockReader>, runtime: Arc<Runtime>) -> Result<ProcessorPtr> {
         let batch_size = ctx.get_settings().get_storage_fetch_part_num()? as usize;
         Ok(ProcessorPtr::create(Box::new(ReadNativeDataSource::<false> {
             ctx,
             output,
+            runtime,
             batch_size,
             block_reader,
             finished: false,
@@ -102,18 +106,14 @@ impl Processor for ReadNativeDataSource<false> {
     async fn async_process(&mut self) -> Result<()> {
         let mut parts = Vec::with_capacity(self.batch_size);
         let mut chunks = Vec::with_capacity(self.batch_size);
+        // let block_reader = self.block_reader.clone();
 
         for _index in 0..self.batch_size {
             if let Some(part) = self.ctx.try_get_part() {
                 parts.push(part.clone());
-                let block_reader = self.block_reader.clone();
-
-                chunks.push(async move {
-                    let handler = common_base::base::tokio::spawn(async move {
-                        block_reader.async_read_native_columns_data(part).await
-                    });
-                    handler.await.unwrap()
-                });
+                let runtime = self.runtime.clone();
+                let s = self.block_reader.async_read_native_columns_data(part, Some(runtime));
+                chunks.push(s);
             }
         }
 

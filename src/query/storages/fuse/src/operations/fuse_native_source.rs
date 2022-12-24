@@ -217,11 +217,11 @@ impl Processor for FuseNativeSource {
             State::ReadData(Some(part)) => {
                 let mut chunks = self
                     .prewhere_reader
-                    .async_read_native_columns_data(part.clone())
+                    .async_read_native_columns_data(part.clone(), None)
                     .await?;
 
                 if let Some(r) = self.remain_reader.as_ref() {
-                    let cs = r.async_read_native_columns_data(part.clone()).await?;
+                    let cs = r.async_read_native_columns_data(part.clone(), None).await?;
                     chunks.extend(cs)
                 }
 

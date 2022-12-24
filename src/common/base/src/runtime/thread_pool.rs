@@ -36,6 +36,10 @@ impl<T: Send> TaskJoinHandler<T> {
     pub fn join(&self) -> T {
         self.rx.recv_blocking().unwrap()
     }
+
+    pub async fn async_join(&self) -> T {
+        self.rx.recv().await.unwrap()
+    }
 }
 
 impl ThreadPool {
@@ -55,9 +59,9 @@ impl ThreadPool {
     }
 
     pub fn execute<F, R>(&self, f: F) -> TaskJoinHandler<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
+        where
+            F: FnOnce() -> R + Send + 'static,
+            R: Send + 'static,
     {
         let (tx, rx) = async_channel::bounded(1);
         let _ = self.tx.send_blocking(Box::new(move || {
