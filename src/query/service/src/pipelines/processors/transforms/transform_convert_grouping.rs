@@ -34,6 +34,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::Serializer;
+use tracing::info;
 
 use crate::pipelines::processors::transforms::aggregator::AggregateInfo;
 use crate::pipelines::processors::transforms::aggregator::BucketAggregator;
@@ -294,7 +295,17 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
                         },
                     };
                 }
-                _ => { /* finished or done current bucket, do nothing */ }
+                InputPortState::Finished => { /* finished or done current bucket, do nothing */ }
+                InputPortState::Active { port, bucket } => {
+                    info!(
+                        "working bucket: {}, got bucket: {}",
+                        self.working_bucket, bucket
+                    );
+
+                    if *bucket < self.working_bucket {
+                        unreachable!();
+                    }
+                }
             }
         }
 
