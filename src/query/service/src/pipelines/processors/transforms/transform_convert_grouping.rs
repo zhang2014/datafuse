@@ -54,14 +54,14 @@ struct ConvertGroupingMetaInfo {
 
 impl Serialize for ConvertGroupingMetaInfo {
     fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+        where S: Serializer {
         unreachable!("ConvertGroupingMetaInfo does not support exchanging between multiple nodes")
     }
 }
 
 impl<'de> Deserialize<'de> for ConvertGroupingMetaInfo {
     fn deserialize<D>(_: D) -> Result<Self, D::Error>
-    where D: Deserializer<'de> {
+        where D: Deserializer<'de> {
         unreachable!("ConvertGroupingMetaInfo does not support exchanging between multiple nodes")
     }
 }
@@ -101,6 +101,7 @@ pub struct TransformConvertGrouping<Method: HashMethod + PolymorphicKeysHelper<M
     inputs: Vec<InputPortState>,
 
     working_bucket: isize,
+    min_bucket: isize,
     method: Method,
     params: Arc<AggregatorParams>,
     buckets_blocks: HashMap<isize, Vec<DataBlock>>,
@@ -128,6 +129,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method>> TransformConvertGroupin
             working_bucket: 0,
             output: OutputPort::create(),
             buckets_blocks: HashMap::new(),
+            min_bucket: MAX_BUCKET_NUM,
         })
     }
 
@@ -169,7 +171,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method>> TransformConvertGroupin
 
 #[async_trait::async_trait]
 impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Processor
-    for TransformConvertGrouping<Method>
+for TransformConvertGrouping<Method>
 {
     fn name(&self) -> String {
         String::from("TransformConvertGrouping")
@@ -219,7 +221,6 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
             }
         }
 
-        let mut min_bucket = MAX_BUCKET_NUM;
         let mut all_port_prepared_data = true;
 
         for input in self.inputs.iter_mut() {
@@ -228,7 +229,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
                     port.finish();
                     *input = InputPortState::Finished;
                 }
-                InputPortState::Active { port, bucket } if *bucket == self.working_bucket => {
+                InputPortState::Active { port, bucket } if *bucket <= self.working_bucket => {
                     port.set_need_data();
 
                     if !port.has_data() {
@@ -270,7 +271,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
                         Some(info) => match info.overflow {
                             None => {
                                 *bucket = info.bucket + 1;
-                                min_bucket = std::cmp::min(info.bucket, min_bucket);
+                                self.min_bucket = std::cmp::min(info.bucket, self.min_bucket);
                                 match self.buckets_blocks.entry(info.bucket) {
                                     Entry::Vacant(v) => {
                                         v.insert(vec![data_block]);
@@ -302,9 +303,14 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
                         self.working_bucket, bucket
                     );
 
-                    if *bucket < self.working_bucket {
-                        unreachable!();
-                    }
+                    // if bucket
+
+                    // port.set_need_data();
+                    // self.min_bucket = std::cmp::min(*bucket, self.min_bucket);`
+                    // if *bucket < self.working_bucket {
+                    //     // all_port_prepared_data
+                    //     unreachable!();
+                    // }
                 }
             }
         }
@@ -330,7 +336,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
                 return Ok(Event::Sync);
             }
 
-            if min_bucket == MAX_BUCKET_NUM {
+            if self.min_bucket == MAX_BUCKET_NUM {
                 self.output.finish();
 
                 for input in &self.inputs {
@@ -342,13 +348,15 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
                 return Ok(Event::Finished);
             }
 
-            if let Some(bucket_blocks) = self.buckets_blocks.remove(&min_bucket) {
+            info!("grouping bucket {}", self.min_bucket);
+            if let Some(bucket_blocks) = self.buckets_blocks.remove(&self.min_bucket) {
                 self.output.push_data(Ok(DataBlock::empty_with_meta(
-                    ConvertGroupingMetaInfo::create(min_bucket, bucket_blocks),
+                    ConvertGroupingMetaInfo::create(self.min_bucket, bucket_blocks),
                 )));
             }
 
-            self.working_bucket = min_bucket + 1;
+            self.working_bucket = self.min_bucket + 1;
+            self.min_bucket = MAX_BUCKET_NUM;
             return Ok(Event::NeedConsume);
         }
 
@@ -469,7 +477,7 @@ struct MergeBucketTransform<Method: HashMethod + PolymorphicKeysHelper<Method> +
 }
 
 impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static>
-    MergeBucketTransform<Method>
+MergeBucketTransform<Method>
 {
     pub fn try_create(
         input: Arc<InputPort>,
@@ -490,7 +498,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static>
 
 #[async_trait::async_trait]
 impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Processor
-    for MergeBucketTransform<Method>
+for MergeBucketTransform<Method>
 {
     fn name(&self) -> String {
         String::from("MergeBucketTransform")
@@ -541,6 +549,7 @@ impl<Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static> Proces
             let mut blocks = vec![];
             if let Some(meta) = data_block.get_meta() {
                 if let Some(meta) = meta.as_any().downcast_ref::<ConvertGroupingMetaInfo>() {
+                    info!("recv bucket {}", meta.bucket);
                     blocks.extend(meta.blocks.iter().cloned());
                 }
             }
