@@ -175,6 +175,7 @@ where Method: HashMethod + PolymorphicKeysHelper<Method> + Send + 'static
         }
         for data_block in blocks {
             let block = data_block.convert_to_full();
+            // let block = data_block;
             // 1.1 and 1.2.
             let aggregate_function_len = self.params.aggregate_functions.len();
             let keys_column = block
