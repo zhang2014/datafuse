@@ -5472,7 +5472,7 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 [[package]]
 name = "opendal"
 version = "0.28.0"
-source = "git+https://github.com/zhang2014/opendal?branch=test#5fb1078a27d53c586aa024b451c0d3f997fa9f31"
+source = "git+https://github.com/zhang2014/opendal?branch=test#057cfe2184ac350a8a70fa2f9aa9ad756063efe2"
 dependencies = [
  "anyhow",
  "async-compat",
