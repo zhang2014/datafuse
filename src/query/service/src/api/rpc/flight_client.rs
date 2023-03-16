@@ -76,7 +76,7 @@ impl FlightClient {
                     .with_metadata("x-query-id", query_id)?
                     .build(),
             )
-            .await?,
+                .await?,
         ))
     }
 
@@ -99,13 +99,13 @@ impl FlightClient {
                     .with_metadata("x-fragment-id", &fragment_id.to_string())?
                     .build(),
             )
-            .await?,
+                .await?,
         ))
     }
 
     async fn exchange_streaming(
         &mut self,
-        request: impl tonic::IntoStreamingRequest<Message = FlightData>,
+        request: impl tonic::IntoStreamingRequest<Message=FlightData>,
     ) -> Result<Streaming<FlightData>> {
         match self.inner.do_exchange(request).await {
             Ok(res) => Ok(res.into_inner()),
@@ -635,6 +635,12 @@ impl FlightExchangeRef {
         }
 
         false
+    }
+
+    pub fn dec_output_ref(&self) {
+        if !self.is_closed_response.fetch_or(true, Ordering::SeqCst) {
+            assert_ne!(self.state.response_count.fetch_sub(1, Ordering::SeqCst), 1);
+        }
     }
 
     pub async fn close_output(&self) -> bool {
