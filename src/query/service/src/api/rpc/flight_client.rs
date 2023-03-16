@@ -639,7 +639,7 @@ impl FlightExchangeRef {
 
     pub fn dec_output_ref(&self) {
         if !self.is_closed_response.fetch_or(true, Ordering::SeqCst) {
-            assert_ne!(self.state.response_count.fetch_sub(1, Ordering::SeqCst), 1);
+            self.state.response_count.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
