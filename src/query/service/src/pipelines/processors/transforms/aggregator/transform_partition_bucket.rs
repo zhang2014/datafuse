@@ -153,12 +153,20 @@ impl<Method: HashMethodBounds, V: Copy + Send + Sync + 'static>
                 let (bucket, res) = match block_meta {
                     AggregateMeta::Spilling(_) => unreachable!(),
                     AggregateMeta::Partitioned { .. } => unreachable!(),
-                    AggregateMeta::Spilled(payload) => (payload.bucket, SINGLE_LEVEL_BUCKET_NUM),
-                    AggregateMeta::Serialized(payload) => (payload.bucket, payload.bucket),
-                    AggregateMeta::HashTable(payload) => (payload.bucket, payload.bucket),
+                    AggregateMeta::Spilled(payload) => {
+                        println!("working bucket {}, add bucket spilled {}", self.working_bucket, payload.bucket);
+                        (payload.bucket, SINGLE_LEVEL_BUCKET_NUM)
+                    },
+                    AggregateMeta::Serialized(payload) => {
+                        println!("working bucket {}, add bucket serialized {}", self.working_bucket, payload.bucket);
+                        (payload.bucket, payload.bucket)
+                    },
+                    AggregateMeta::HashTable(payload) => {
+                        println!("working bucket {}, add bucket hashtable {}", self.working_bucket, payload.bucket);
+                        (payload.bucket, payload.bucket)
+                    },
                 };
 
-                println!("working bucket {}, add bucket {}", self.working_bucket, bucket);
                 if bucket > SINGLE_LEVEL_BUCKET_NUM {
                     match self.buckets_blocks.entry(bucket) {
                         Entry::Vacant(v) => {
