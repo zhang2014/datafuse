@@ -244,7 +244,7 @@ where Method: HashMethodBounds
                                 payload.columns_layout,
                             ));
 
-                        serialize_block(bucket, data_block, &self.ipc_fields, &self.options)?
+                        serialize_block(-1, data_block, &self.ipc_fields, &self.options)?
                     }
                     AggregateMeta::HashTable(payload) => {
                         let bucket = payload.bucket;

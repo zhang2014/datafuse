@@ -156,7 +156,10 @@ impl<Method: HashMethodBounds> Processor for TransformScatterGroupBySpillWriter<
                     let mut buckets_block = Vec::with_capacity(new_blocks.len());
                     for bucket_blocks in new_blocks.iter_mut() {
                         buckets_block.push(match bucket_blocks.pop_front() {
-                            None => DataBlock::empty(),
+                            None => {
+                                // println!("diff block type");
+                                DataBlock::empty()
+                            },
                             Some(block) => {
                                 has_data |= !block.is_empty() || block.get_meta().is_some();
                                 block
