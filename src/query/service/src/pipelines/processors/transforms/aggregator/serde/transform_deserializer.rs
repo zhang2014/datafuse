@@ -78,28 +78,34 @@ where
             let mut data_block = self.input.pull_data().unwrap()?;
 
             if let Some(block_meta) = data_block.take_meta() {
-                let option = AggregateSerdeMeta::downcast_ref_from(&block_meta);
-                if option.is_some() {
+                if AggregateSerdeMeta::downcast_ref_from(&block_meta).is_some() {
                     let meta = AggregateSerdeMeta::downcast_from(block_meta).unwrap();
 
                     self.output.push_data(Ok(DataBlock::empty_with_meta(
                         match meta.typ == BUCKET_TYPE {
-                            true => AggregateMeta::<Method, V>::create_serialized(
-                                meta.bucket,
-                                data_block,
-                            ),
-                            false => AggregateMeta::<Method, V>::create_spilled(
-                                meta.bucket,
-                                meta.location.unwrap(),
-                                meta.data_range.unwrap(),
-                                meta.columns_layout,
-                            ),
+                            true => {
+                                println!("Serialized AggregateSerdeMeta");
+                                AggregateMeta::<Method, V>::create_serialized(
+                                    meta.bucket,
+                                    data_block,
+                                )
+                            },
+                            false => {
+                                println!("Spilled AggregateSerdeMeta");
+                                AggregateMeta::<Method, V>::create_spilled(
+                                    meta.bucket,
+                                    meta.location.unwrap(),
+                                    meta.data_range.unwrap(),
+                                    meta.columns_layout,
+                                )
+                            },
                         },
                     )));
 
                     return Ok(Event::NeedConsume);
                 }
 
+                println!("No AggregateSerdeMeta");
                 self.output.push_data(data_block.add_meta(Some(block_meta)));
                 return Ok(Event::NeedConsume);
             }
