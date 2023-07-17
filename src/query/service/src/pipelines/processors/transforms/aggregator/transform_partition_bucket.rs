@@ -158,6 +158,7 @@ impl<Method: HashMethodBounds, V: Copy + Send + Sync + 'static>
                     AggregateMeta::HashTable(payload) => (payload.bucket, payload.bucket),
                 };
 
+                println!("working bucket {}, add bucket {}", self.working_bucket, bucket);
                 if bucket > SINGLE_LEVEL_BUCKET_NUM {
                     match self.buckets_blocks.entry(bucket) {
                         Entry::Vacant(v) => {

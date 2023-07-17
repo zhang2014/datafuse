@@ -88,7 +88,7 @@ impl TransformExchangeDeserializer {
             )),
         }?;
 
-        println!("Meta {:?}", meta);
+        // println!("Meta {:?}", meta);
         let mut row_count_meta = &fragment_data.get_meta()[..ROW_HEADER_SIZE];
         let row_count: u32 = row_count_meta.read_scalar()?;
 
