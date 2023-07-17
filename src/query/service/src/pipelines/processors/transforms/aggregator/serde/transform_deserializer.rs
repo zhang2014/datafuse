@@ -51,9 +51,9 @@ impl<Method: HashMethodBounds, V: Send + Sync + 'static> TransformDeserializer<M
 
 #[async_trait::async_trait]
 impl<Method, V> Processor for TransformDeserializer<Method, V>
-where
-    Method: HashMethodBounds,
-    V: Send + Sync + 'static,
+    where
+        Method: HashMethodBounds,
+        V: Send + Sync + 'static,
 {
     fn name(&self) -> String {
         String::from("TransformAggregateDeserializer")
@@ -83,29 +83,22 @@ where
 
                     self.output.push_data(Ok(DataBlock::empty_with_meta(
                         match meta.typ == BUCKET_TYPE {
-                            true => {
-                                println!("Serialized AggregateSerdeMeta");
-                                AggregateMeta::<Method, V>::create_serialized(
-                                    meta.bucket,
-                                    data_block,
-                                )
-                            },
-                            false => {
-                                println!("Spilled AggregateSerdeMeta");
-                                AggregateMeta::<Method, V>::create_spilled(
-                                    meta.bucket,
-                                    meta.location.unwrap(),
-                                    meta.data_range.unwrap(),
-                                    meta.columns_layout,
-                                )
-                            },
+                            true => AggregateMeta::<Method, V>::create_serialized(
+                                meta.bucket,
+                                data_block,
+                            ),
+                            false => AggregateMeta::<Method, V>::create_spilled(
+                                meta.bucket,
+                                meta.location.unwrap(),
+                                meta.data_range.unwrap(),
+                                meta.columns_layout,
+                            ),
                         },
                     )));
 
                     return Ok(Event::NeedConsume);
                 }
 
-                println!("No AggregateSerdeMeta");
                 self.output.push_data(data_block.add_meta(Some(block_meta)));
                 return Ok(Event::NeedConsume);
             }
