@@ -143,7 +143,7 @@ impl<Method: HashMethodBounds> Processor for TransformScatterAggregateSerializer
 
                                     self.input_data.push(None);
                                     self.output_data.push(serialize_block(
-                                        bucket,
+                                        -1,
                                         data_block,
                                         &self.ipc_fields,
                                         &self.options,
