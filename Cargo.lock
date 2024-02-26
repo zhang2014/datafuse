@@ -4435,6 +4435,7 @@ dependencies = [
  "bytes",
  "crc32fast",
  "crossbeam-channel",
+ "databend-common-base",
  "databend-common-cache",
  "databend-common-exception",
  "databend-common-metrics",
