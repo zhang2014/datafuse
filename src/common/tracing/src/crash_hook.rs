@@ -140,10 +140,15 @@ pub fn set_crash_hook(version: String) {
 
 #[cfg(test)]
 mod tests {
+    use databend_common_base::runtime::ThreadTracker;
+
     use crate::set_crash_hook;
 
     #[test]
     fn test_crash() {
+        let mut tracking_payload = ThreadTracker::new_tracking_payload();
+        tracking_payload.query_id = Some("QueryID".to_string());
+        let _guard = ThreadTracker::tracking(tracking_payload);
         set_crash_hook(String::from("1.2.111"));
 
         sigsegv_fun();
