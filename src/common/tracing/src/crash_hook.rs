@@ -1,51 +1,135 @@
-use std::backtrace::Backtrace;
-use std::mem;
-use std::sync::{LazyLock, Mutex, PoisonError};
-use crash_handler::{CrashContext, CrashEvent, CrashEventResult, CrashHandler, Error};
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
-struct CrashHook;
+use databend_common_base::runtime::ThreadTracker;
 
-unsafe impl CrashEvent for CrashHook {
-    fn on_crash(&self, context: &CrashContext) -> CrashEventResult {
-        log::error!("{:?}", Backtrace::force_capture());
-        eprintln!("{:?}", Backtrace::force_capture());
-        // std::backtrace::Backtrace::capture()
-        // context
-        // context.handler_thread
-        // if let Some(exception) = context.exception {
-        //     exception.code
-        // }
-        // context
-        CrashEventResult::Handled(false)
+use crate::panic_hook::backtrace;
+
+static CRASH_HANDLER_LOCK: Mutex<()> = Mutex::new(());
+
+static mut VERSION: String = String::new();
+static mut SIGNALS: [libc::sighandler_t; 32] = [0; 32];
+
+fn sigsegv_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
+    unsafe {
+        format!(
+            "Signal {} ({}), si_code {} ({}), Address {}\n",
+            libc::SIGSEGV,
+            "SIGSEGV",
+            (*info).si_code,
+            "Unknown", // TODO: SEGV_MAPERR or SEGV_ACCERR
+            match (*info).si_addr.is_null() {
+                true => "null points".to_string(),
+                false => format!("{:#02x?}", (*info).si_addr as usize),
+            },
+        )
     }
 }
 
-static HANDLER: Mutex<Option<CrashHandler>> = Mutex::new(None);
+fn sigbus_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
+    unsafe {
+        format!(
+            "Signal {} ({}), si_code {} ({})\n",
+            libc::SIGBUS,
+            "SIGBUS",
+            (*info).si_code,
+            match (*info).si_code {
+                libc::BUS_ADRALN => "BUS_ADRALN, invalid address alignment",
+                libc::BUS_ADRERR => "BUS_ADRERR, non-existent physical address",
+                libc::BUS_OBJERR => "BUS_OBJERR, object specific hardware error",
+                _ => "Unknown",
+            },
+        )
+    }
+}
 
-// fn add_signal_handler(signal_function:)
+fn sigill_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
+    unsafe {
+        format!(
+            "Signal {} ({}), si_code {} ({})， instruction address:{} \n",
+            libc::SIGILL,
+            "SIGILL",
+            (*info).si_code,
+            "Unknown", /* ILL_ILLOPC ILL_ILLOPN ILL_ILLADR ILL_ILLTRP ILL_PRVOPC ILL_PRVREG ILL_COPROC ILL_BADSTK, */
+            match (*info).si_addr.is_null() {
+                true => "null points".to_string(),
+                false => format!("{:#02x?}", (*info).si_addr as usize),
+            },
+        )
+    }
+}
+
+fn sigfpe_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
+    unsafe {
+        format!(
+            "Signal {} ({}), si_code {} ({})， instruction address:{} \n",
+            libc::SIGFPE,
+            "SIGFPE",
+            (*info).si_code,
+            "Unknown", /* FPE_INTDIV FPE_INTOVF FPE_FLTDIV FPE_FLTOVF FPE_FLTUND FPE_FLTRES FPE_FLTINV FPE_FLTSUB */
+            match (*info).si_addr.is_null() {
+                true => "null points".to_string(),
+                false => format!("{:#02x?}", (*info).si_addr as usize),
+            },
+        )
+    }
+}
+
+fn signal_message(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) -> String {
+    // https://pubs.opengroup.org/onlinepubs/007908799/xsh/signal.h.html
+    match sig {
+        libc::SIGBUS => sigbus_message(info, uc),
+        libc::SIGILL => sigill_message(info, uc),
+        libc::SIGSEGV => sigsegv_message(info, uc),
+        libc::SIGFPE => sigfpe_message(info, uc),
+        _ => String::new(),
+    }
+}
 
 unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
-    eprintln!("handled {}", sig);
+    let message = format!(
+        "########## Crash fault info ############\npid: {}\nQueryID: {}\nVersion: {} \nTimestamp(UTC): {}, Timestamp(Local): {}\n{} \nBacktrace:\n{}",
+        (*info).si_pid,
+        match ThreadTracker::query_id() {
+            None => "Unknown",
+            Some(query_id) => query_id,
+        },
+        VERSION,
+        chrono::Utc::now(),
+        chrono::Local::now(),
+        signal_message(sig, info, uc),
+        backtrace(),
+    );
+    libc::write(2, message.as_ptr().cast(), message.len());
+
+    if sig < 32 && SIGNALS[sig as usize] != 0 {
+        let fn2: extern "C" fn(i32, *mut libc::siginfo_t, *mut libc::c_void) =
+            std::mem::transmute(SIGNALS[sig as usize]);
+
+        fn2(sig, info, uc);
+    }
 }
 
 pub unsafe fn add_signal_handler(signals: Vec<i32>) {
-    let mut sa = std::mem::zeroed::<libc::sigaction>();
-    sa.sa_sigaction = signal_handler as usize;
-    sa.sa_flags = libc::SA_SIGINFO;
-
-    libc::sigemptyset(&mut sa.sa_mask);
-
-    for signal in &signals {
-        libc::sigaddset(&mut sa.sa_mask, *signal);
-    }
-
-    for signal in &signals {
-        libc::sigaction(*signal, &sa, std::ptr::null_mut());
+    for signal in signals {
+        if signal < 32 && SIGNALS[signal as usize] == 0 {
+            let mut sa = std::mem::zeroed::<libc::sigaction>();
+            libc::sigaction(signal, std::ptr::null(), &mut sa);
+            SIGNALS[signal as usize] = sa.sa_sigaction;
+            sa.sa_sigaction = signal_handler as usize;
+            libc::sigaction(signal, &sa, std::ptr::null_mut());
+        }
     }
 }
 
-pub fn set_crash_hook() {
-    unsafe { add_signal_handler(vec![libc::SIGABRT, libc::SIGSEGV]) }
+pub fn set_crash_hook(version: String) {
+    let _guard = CRASH_HANDLER_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    unsafe {
+        VERSION = version;
+        add_signal_handler(vec![libc::SIGSEGV]);
+    }
 }
 
 #[cfg(test)]
@@ -54,8 +138,13 @@ mod tests {
 
     #[test]
     fn test_crash() {
-        set_crash_hook();
+        set_crash_hook(String::from("1.2.111"));
 
+        // sigsegv_fun();
+    }
+
+    #[allow(unused)]
+    fn sigsegv_fun() {
         unsafe { std::ptr::null_mut::<i32>().write(42) };
     }
 }
