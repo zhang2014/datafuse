@@ -10,16 +10,19 @@ static mut SIGNALS: [libc::sighandler_t; 32] = [0; 32];
 
 fn sigsegv_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
     unsafe {
+        let mut address = String::from("null points");
+
+        if !(*info).si_addr().is_null() {
+            address = format!("{:#02x?}", (*info).si_addr() as usize);
+        }
+
         format!(
             "Signal {} ({}), si_code {} ({}), Address {}\n",
             libc::SIGSEGV,
             "SIGSEGV",
             (*info).si_code,
             "Unknown", // TODO: SEGV_MAPERR or SEGV_ACCERR
-            match (*info).si_addr().is_null() {
-                true => "null points".to_string(),
-                false => format!("{:#02x?}", (*info).si_addr() as usize),
-            },
+            address,
         )
     }
 }
@@ -84,16 +87,19 @@ fn signal_message(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) -
     }
 }
 
-unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
-    let message = format!(
-        "########## Crash fault info ############\npid: {}\nVersion: {} \nTimestamp(UTC): {}, {} \nBacktrace:\n{}",
-        (*info).si_pid(),
-        VERSION,
-        chrono::Utc::now(),
-        signal_message(sig, info, uc),
-        backtrace(),
-    );
+unsafe fn write_error(message: impl Into<String>) {
+    let message = message.into();
     libc::write(2, message.as_ptr().cast(), message.len());
+}
+
+unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
+    write_error(format!("{:#^80}\n", " Crash fault info "));
+    write_error(format!("PID: {}\n", (*info).si_pid()));
+    write_error(format!("Version: {}\n", VERSION));
+    write_error(format!("Timestamp(UTC): {}\n", chrono::Utc::now()));
+    write_error(signal_message(sig, info, uc));
+    write_error("\nBacktrace:\n");
+    write_error(backtrace());
 
     if sig < 32 && SIGNALS[sig as usize] != 0 {
         let fn2: extern "C" fn(i32, *mut libc::siginfo_t, *mut libc::c_void) =
