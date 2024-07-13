@@ -1,4 +1,5 @@
 use std::backtrace::Backtrace;
+use std::mem;
 use std::sync::{LazyLock, Mutex, PoisonError};
 use crash_handler::{CrashContext, CrashEvent, CrashEventResult, CrashHandler, Error};
 
@@ -15,22 +16,36 @@ unsafe impl CrashEvent for CrashHook {
         //     exception.code
         // }
         // context
-        todo!()
+        CrashEventResult::Handled(false)
     }
 }
 
 static HANDLER: Mutex<Option<CrashHandler>> = Mutex::new(None);
 
-pub fn set_crash_hook() {
-    match CrashHandler::attach(Box::new(CrashHook)) {
-        Ok(handler) => {
-            let mut guard = HANDLER.lock().unwrap_or_else(PoisonError::into_inner);
-            *guard = Some(handler);
-        }
-        Err(cause) => {
-            log::error!("Attach crash handler failure, cause: {:?}", cause);
-        }
+// fn add_signal_handler(signal_function:)
+
+unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
+    eprintln!("handled {}", sig);
+}
+
+pub unsafe fn add_signal_handler(signals: Vec<i32>) {
+    let mut sa = std::mem::zeroed::<libc::sigaction>();
+    sa.sa_sigaction = signal_handler as usize;
+    sa.sa_flags = libc::SA_SIGINFO;
+
+    libc::sigemptyset(&mut sa.sa_mask);
+
+    for signal in &signals {
+        libc::sigaddset(&mut sa.sa_mask, *signal);
     }
+
+    for signal in &signals {
+        libc::sigaction(*signal, &sa, std::ptr::null_mut());
+    }
+}
+
+pub fn set_crash_hook() {
+    unsafe { add_signal_handler(vec![libc::SIGABRT, libc::SIGSEGV]) }
 }
 
 #[cfg(test)]
@@ -40,8 +55,6 @@ mod tests {
     #[test]
     fn test_crash() {
         set_crash_hook();
-
-        struct SS;
 
         unsafe { std::ptr::null_mut::<i32>().write(42) };
     }
