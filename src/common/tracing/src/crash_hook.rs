@@ -1,8 +1,6 @@
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
-use databend_common_base::runtime::ThreadTracker;
-
 use crate::panic_hook::backtrace;
 
 static CRASH_HANDLER_LOCK: Mutex<()> = Mutex::new(());
@@ -88,15 +86,10 @@ fn signal_message(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) -
 
 unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
     let message = format!(
-        "########## Crash fault info ############\npid: {}\nQueryID: {}\nVersion: {} \nTimestamp(UTC): {}, Timestamp(Local): {}\n{} \nBacktrace:\n{}",
+        "########## Crash fault info ############\npid: {}\nVersion: {} \nTimestamp(UTC): {}, {} \nBacktrace:\n{}",
         (*info).si_pid(),
-        match ThreadTracker::query_id() {
-            None => "Unknown",
-            Some(query_id) => query_id,
-        },
         VERSION,
         chrono::Utc::now(),
-        chrono::Local::now(),
         signal_message(sig, info, uc),
         backtrace(),
     );
@@ -140,15 +133,10 @@ pub fn set_crash_hook(version: String) {
 
 #[cfg(test)]
 mod tests {
-    use databend_common_base::runtime::ThreadTracker;
-
     use crate::set_crash_hook;
 
     #[test]
     fn test_crash() {
-        let mut tracking_payload = ThreadTracker::new_tracking_payload();
-        tracking_payload.query_id = Some("QueryID".to_string());
-        let _guard = ThreadTracker::tracking(tracking_payload);
         set_crash_hook(String::from("1.2.111"));
 
         sigsegv_fun();
