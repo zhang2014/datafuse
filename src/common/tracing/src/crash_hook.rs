@@ -18,9 +18,9 @@ fn sigsegv_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
             "SIGSEGV",
             (*info).si_code,
             "Unknown", // TODO: SEGV_MAPERR or SEGV_ACCERR
-            match (*info).si_addr.is_null() {
+            match (*info).si_addr().is_null() {
                 true => "null points".to_string(),
-                false => format!("{:#02x?}", (*info).si_addr as usize),
+                false => format!("{:#02x?}", (*info).si_addr() as usize),
             },
         )
     }
@@ -51,9 +51,9 @@ fn sigill_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
             "SIGILL",
             (*info).si_code,
             "Unknown", /* ILL_ILLOPC ILL_ILLOPN ILL_ILLADR ILL_ILLTRP ILL_PRVOPC ILL_PRVREG ILL_COPROC ILL_BADSTK, */
-            match (*info).si_addr.is_null() {
+            match (*info).si_addr().is_null() {
                 true => "null points".to_string(),
-                false => format!("{:#02x?}", (*info).si_addr as usize),
+                false => format!("{:#02x?}", (*info).si_addr() as usize),
             },
         )
     }
@@ -67,9 +67,9 @@ fn sigfpe_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
             "SIGFPE",
             (*info).si_code,
             "Unknown", /* FPE_INTDIV FPE_INTOVF FPE_FLTDIV FPE_FLTOVF FPE_FLTUND FPE_FLTRES FPE_FLTINV FPE_FLTSUB */
-            match (*info).si_addr.is_null() {
+            match (*info).si_addr().is_null() {
                 true => "null points".to_string(),
-                false => format!("{:#02x?}", (*info).si_addr as usize),
+                false => format!("{:#02x?}", (*info).si_addr() as usize),
             },
         )
     }
@@ -89,7 +89,7 @@ fn signal_message(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) -
 unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
     let message = format!(
         "########## Crash fault info ############\npid: {}\nQueryID: {}\nVersion: {} \nTimestamp(UTC): {}, Timestamp(Local): {}\n{} \nBacktrace:\n{}",
-        (*info).si_pid,
+        (*info).si_pid(),
         match ThreadTracker::query_id() {
             None => "Unknown",
             Some(query_id) => query_id,
@@ -128,7 +128,13 @@ pub fn set_crash_hook(version: String) {
         .unwrap_or_else(PoisonError::into_inner);
     unsafe {
         VERSION = version;
-        add_signal_handler(vec![libc::SIGSEGV]);
+        add_signal_handler(vec![
+            libc::SIGSEGV,
+            libc::SIGILL,
+            libc::SIGBUS,
+            libc::SIGFPE,
+            libc::SIGSYS,
+        ]);
     }
 }
 
@@ -140,7 +146,7 @@ mod tests {
     fn test_crash() {
         set_crash_hook(String::from("1.2.111"));
 
-        // sigsegv_fun();
+        sigsegv_fun();
     }
 
     #[allow(unused)]
