@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(try_blocks)]
+#![feature(lazy_cell)]
 #![allow(clippy::uninlined_format_args)]
 
 mod config;
@@ -20,6 +21,7 @@ mod init;
 mod loggers;
 mod panic_hook;
 mod structlog;
+mod crash_hook;
 
 pub use crate::config::Config;
 pub use crate::config::FileConfig;
@@ -37,6 +39,7 @@ pub use crate::init::start_trace_for_remote_request;
 pub use crate::init::GlobalLogger;
 pub use crate::panic_hook::log_panic;
 pub use crate::panic_hook::set_panic_hook;
+pub use crate::crash_hook::set_crash_hook;
 pub use crate::structlog::DummyReporter;
 pub use crate::structlog::StructLogReporter;
 

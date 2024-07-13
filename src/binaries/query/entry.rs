@@ -29,7 +29,7 @@ use databend_common_exception::Result;
 use databend_common_meta_client::MIN_METASRV_SEMVER;
 use databend_common_metrics::system::set_system_version;
 use databend_common_storage::DataOperator;
-use databend_common_tracing::set_panic_hook;
+use databend_common_tracing::{set_crash_hook, set_panic_hook};
 use databend_enterprise_background_service::get_background_service_handler;
 use databend_query::clusters::ClusterDiscovery;
 use databend_query::local;
@@ -64,6 +64,7 @@ pub async fn run_cmd(conf: &InnerConfig) -> Result<bool> {
 
 pub async fn init_services(conf: &InnerConfig) -> Result<()> {
     set_panic_hook();
+    set_crash_hook();
     set_alloc_error_hook();
 
     #[cfg(target_arch = "x86_64")]

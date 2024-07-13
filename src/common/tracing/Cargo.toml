@@ -30,6 +30,7 @@ serde_json = { workspace = true }
 strip-ansi-escapes = "0.2"
 tonic = { workspace = true }
 tracing-appender = { workspace = true }
+crash-handler = "0.6.2"
 
 [dev-dependencies]
 

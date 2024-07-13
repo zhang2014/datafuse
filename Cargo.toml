@@ -340,6 +340,7 @@ opentelemetry_sdk = { version = "0.23", features = ["trace", "logs", "rt-tokio"]
 tracing = "0.1.40"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json", "valuable"] }
+crash-handler = "0.6.2"
 
 [workspace.lints.rust]
 async_fn_in_trait = "allow"
