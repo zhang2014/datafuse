@@ -1,9 +1,11 @@
+use std::{mem, ptr};
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use crash_handler::{CrashContext, CrashEvent, CrashEventResult};
 
 use crate::panic_hook::backtrace;
 
-static CRASH_HANDLER_LOCK: Mutex<()> = Mutex::new(());
+static CRASH_HANDLER_LOCK: Mutex<Option<crash_handler::CrashHandler>> = Mutex::new(None);
 
 static mut VERSION: String = String::new();
 static mut SIGNALS: [libc::sighandler_t; 32] = [0; 32];
@@ -93,20 +95,40 @@ unsafe fn write_error(message: impl Into<String>) {
 }
 
 unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
-    write_error(format!("{:#^80}\n", " Crash fault info "));
-    write_error(format!("PID: {}\n", (*info).si_pid()));
-    write_error(format!("Version: {}\n", VERSION));
-    write_error(format!("Timestamp(UTC): {}\n", chrono::Utc::now()));
-    write_error(signal_message(sig, info, uc));
-    write_error("\nBacktrace:\n");
+
+    {
+        let mut cur_handler = mem::zeroed();
+        if libc::sigaction(sig as i32, ptr::null_mut(), &mut cur_handler) == 0
+            && cur_handler.sa_sigaction == signal_handler as usize
+            && cur_handler.sa_flags & libc::SA_SIGINFO == 0
+        {
+            // Reset signal handler with the correct flags.
+            libc::sigemptyset(&mut cur_handler.sa_mask);
+            libc::sigaddset(&mut cur_handler.sa_mask, sig as i32);
+
+            cur_handler.sa_sigaction = signal_handler as usize;
+            cur_handler.sa_flags = libc::SA_ONSTACK | libc::SA_SIGINFO;
+
+            if libc::sigaction(sig as i32, &cur_handler, ptr::null_mut()) == -1 {
+                // When resetting the handler fails, try to reset the
+                // default one to avoid an infinite loop here.
+                install_default_handler(sig);
+            }
+
+            // exit the handler as we should be called again soon
+            return;
+        }
+    }
+
+    // write_error(format!("{:#^80}\n", " Crash fault info "));
+    // write_error(format!("PID: {}\n", (*info).si_pid()));
+    // write_error(format!("Version: {}\n", VERSION));
+    // write_error(format!("Timestamp(UTC): {}\n", chrono::Utc::now()));
+    // write_error(signal_message(sig, info, uc));
+    // write_error("\nBacktrace:\n");
     write_error(backtrace());
 
-    if sig < 32 && SIGNALS[sig as usize] != 0 {
-        let fn2: extern "C" fn(i32, *mut libc::siginfo_t, *mut libc::c_void) =
-            std::mem::transmute(SIGNALS[sig as usize]);
-
-        fn2(sig, info, uc);
-    }
+    std::process::exit(1);
 }
 
 pub unsafe fn add_signal_handler(signals: Vec<i32>) {
@@ -121,20 +143,107 @@ pub unsafe fn add_signal_handler(signals: Vec<i32>) {
     }
 }
 
+
+struct CrashHandler;
+
+unsafe impl CrashEvent for CrashHandler {
+    fn on_crash(&self, context: &CrashContext) -> CrashEventResult {
+        unsafe { write_error(backtrace()); }
+        CrashEventResult::Handled(false)
+    }
+}
+
+const fn get_stack_size() -> usize {
+    if libc::SIGSTKSZ > 16 * 1024 {
+        libc::SIGSTKSZ
+    } else {
+        16 * 1024
+    }
+}
+
+const SIG_STACK_SIZE: usize = get_stack_size();
+
+pub unsafe fn install_sigaltstack() {
+    // Check to see if the existing sigaltstack, and if it exists, is it big
+    // enough. If so we don't need to allocate our own.
+    let mut old_stack = mem::zeroed();
+    let r = libc::sigaltstack(ptr::null(), &mut old_stack);
+    assert_eq!(
+        r,
+        0,
+        "learning about sigaltstack failed: {}",
+        std::io::Error::last_os_error()
+    );
+
+    if old_stack.ss_flags & libc::SS_DISABLE == 0 && old_stack.ss_size >= SIG_STACK_SIZE {
+        return;
+    }
+
+    // ... but failing that we need to allocate our own, so do all that
+    // here.
+    let guard_size = libc::sysconf(libc::_SC_PAGESIZE) as usize;
+    let alloc_size = guard_size + SIG_STACK_SIZE;
+
+    let ptr = libc::mmap(
+        ptr::null_mut(),
+        alloc_size,
+        libc::PROT_NONE,
+        libc::MAP_PRIVATE | libc::MAP_ANON,
+        -1,
+        0,
+    );
+
+    // Prepare the stack with readable/writable memory and then register it
+    // with `sigaltstack`.
+    let stack_ptr = (ptr as usize + guard_size) as *mut libc::c_void;
+    let r = libc::mprotect(
+        stack_ptr,
+        SIG_STACK_SIZE,
+        libc::PROT_READ | libc::PROT_WRITE,
+    );
+    assert_eq!(
+        r,
+        0,
+        "mprotect to configure memory for sigaltstack failed: {}",
+        std::io::Error::last_os_error()
+    );
+    let new_stack = libc::stack_t {
+        ss_sp: stack_ptr,
+        ss_flags: 0,
+        ss_size: SIG_STACK_SIZE,
+    };
+    let r = libc::sigaltstack(&new_stack, ptr::null_mut());
+    assert_eq!(
+        r,
+        0,
+        "registering new sigaltstack failed: {}",
+        std::io::Error::last_os_error()
+    );
+
+    // *STACK_SAVE.lock() = Some(StackSave {
+    //     old: (old_stack.ss_flags & libc::SS_DISABLE != 0).then_some(old_stack),
+    //     new: new_stack,
+    // });
+
+    // Ok(())
+}
+
 pub fn set_crash_hook(version: String) {
-    let _guard = CRASH_HANDLER_LOCK
+    let mut guard = CRASH_HANDLER_LOCK
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    unsafe {
-        VERSION = version;
-        add_signal_handler(vec![
-            libc::SIGSEGV,
-            libc::SIGILL,
-            libc::SIGBUS,
-            libc::SIGFPE,
-            libc::SIGSYS,
-        ]);
-    }
+    *guard = Some(crash_handler::CrashHandler::attach(Box::new(CrashHandler)).unwrap());
+    // unsafe {
+    //     VERSION = version;
+    //     install_sigaltstack();
+    //     add_signal_handler(vec![
+    //         libc::SIGSEGV,
+    //         libc::SIGILL,
+    //         libc::SIGBUS,
+    //         libc::SIGFPE,
+    //         libc::SIGSYS,
+    //     ]);
+    // }
 }
 
 #[cfg(test)]
