@@ -14,6 +14,7 @@
 
 #![feature(try_blocks)]
 #![feature(lazy_cell)]
+#![feature(thread_id_value)]
 #![allow(clippy::uninlined_format_args)]
 
 mod config;
