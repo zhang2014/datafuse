@@ -146,6 +146,7 @@ impl ProcessorPtr {
 
     /// # Safety
     pub unsafe fn event(&self, cause: EventCause) -> Result<Event> {
+        log::info!("{:?}-{}", std::thread::current().id().as_u64(), self.id().index());
         (*self.inner.get()).event_with_cause(cause)
     }
 

@@ -563,9 +563,9 @@ impl ScheduleQueue {
                     graph,
                     process_future,
                 )
-                .in_span(Span::enter_with_local_parent(std::any::type_name::<
-                    ProcessorAsyncTask,
-                >())),
+                    .in_span(Span::enter_with_local_parent(std::any::type_name::<
+                        ProcessorAsyncTask,
+                    >())),
             );
         }
     }
@@ -678,9 +678,9 @@ impl ScheduleQueue {
                     graph,
                     process_future,
                 )
-                .in_span(Span::enter_with_local_parent(std::any::type_name::<
-                    ProcessorAsyncTask,
-                >())),
+                    .in_span(Span::enter_with_local_parent(std::any::type_name::<
+                        ProcessorAsyncTask,
+                    >())),
             );
         }
     }
@@ -697,7 +697,7 @@ impl RunningGraph {
     ) -> Result<Arc<RunningGraph>> {
         let graph_state =
             ExecutingGraph::create(pipeline, init_epoch, query_id, finish_condvar_notify)?;
-        debug!("Create running graph:{:?}", graph_state);
+        log::info!("Create running graph:{:?}", graph_state);
         Ok(Arc::new(RunningGraph(graph_state)))
     }
 
@@ -709,7 +709,7 @@ impl RunningGraph {
     ) -> Result<Arc<RunningGraph>> {
         let graph_state =
             ExecutingGraph::from_pipelines(pipelines, init_epoch, query_id, finish_condvar_notify)?;
-        debug!("Create running graph:{:?}", graph_state);
+        log::info!("Create running graph:{:?}", graph_state);
         Ok(Arc::new(RunningGraph(graph_state)))
     }
 
@@ -1001,12 +1001,11 @@ impl Debug for ExecutingGraph {
             Dot::with_attr_getters(
                 &self.graph,
                 &[Config::EdgeNoLabel],
-                &|_, edge| format!(
-                    "{} -> {}",
-                    edge.weight().output_index,
-                    edge.weight().input_index
+                &|_, edge| String::new(),
+                &|_, (index, _node)| format!(
+                    "shape=\"ellipse\" style=\"filled\" fillcolor=\"#1f77b4\" nodeindex=\"{}\"",
+                    index.index()
                 ),
-                &|_, (_, _)| String::new(),
             )
         )
     }
