@@ -344,7 +344,7 @@ impl ExecutingGraph {
     ) -> Result<ScheduleQueue> {
         let mut schedule_queue = ScheduleQueue::with_capacity(capacity);
         for sink_index in locker.graph.externals(Direction::Outgoing) {
-            ExecutingGraph::schedule_queue(locker, sink_index, &mut schedule_queue, graph)?;
+            ExecutingGraph::schedule_queue(locker, sink_index, &mut schedule_queue, graph, true)?;
         }
 
         Ok(schedule_queue)
@@ -358,6 +358,7 @@ impl ExecutingGraph {
         index: NodeIndex,
         schedule_queue: &mut ScheduleQueue,
         graph: &Arc<RunningGraph>,
+        init: bool,
     ) -> Result<()> {
         let mut need_schedule_nodes = VecDeque::new();
         let mut need_schedule_edges = VecDeque::new();
@@ -403,7 +404,7 @@ impl ExecutingGraph {
                         state_guard_cache = Some(node.state.lock().unwrap());
                     }
 
-                    node.processor.event(event_cause)
+                    node.processor.event(event_cause, init)
                 }?;
 
                 trace!(
@@ -725,7 +726,7 @@ impl RunningGraph {
     /// Method is thread unsafe and require thread safe call
     pub unsafe fn schedule_queue(self: Arc<Self>, node_index: NodeIndex) -> Result<ScheduleQueue> {
         let mut schedule_queue = ScheduleQueue::with_capacity(0);
-        ExecutingGraph::schedule_queue(&self.0, node_index, &mut schedule_queue, &self)?;
+        ExecutingGraph::schedule_queue(&self.0, node_index, &mut schedule_queue, &self, false)?;
         Ok(schedule_queue)
     }
 

@@ -90,6 +90,7 @@ pub trait Processor: Send {
 // so that later an Arc of it could be moved into the async closure,
 // which async_process returns.
 struct UnsafeSyncCelledProcessor(UnsafeCell<Box<(dyn Processor)>>);
+
 unsafe impl Sync for UnsafeSyncCelledProcessor {}
 
 impl Deref for UnsafeSyncCelledProcessor {
@@ -145,8 +146,13 @@ impl ProcessorPtr {
     }
 
     /// # Safety
-    pub unsafe fn event(&self, cause: EventCause) -> Result<Event> {
-        log::info!("{:?}-{}", std::thread::current().id().as_u64(), self.id().index());
+    pub unsafe fn event(&self, cause: EventCause, init: bool) -> Result<Event> {
+        let thread_id = match init {
+            true => 0_u64,
+            false => std::thread::current().id().as_u64().get(),
+        };
+
+        log::info!("{:?}-{}", thread_id, self.id().index());
         (*self.inner.get()).event_with_cause(cause)
     }
 
@@ -196,7 +202,7 @@ impl ProcessorPtr {
             drop(inner);
             Ok(())
         }
-        .boxed()
+            .boxed()
     }
 
     /// # Safety
