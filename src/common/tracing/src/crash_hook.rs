@@ -230,6 +230,8 @@ unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *m
     let lock = CRASH_HANDLER_LOCK.lock();
     let guard = lock.unwrap_or_else(PoisonError::into_inner);
 
+    ThreadTracker::set_crash();
+
     if let Some(crash_handler) = guard.as_ref() {
         crash_handler.recv_signal(sig, info, uc);
     }

@@ -44,6 +44,7 @@ pub mod linux {
     use tikv_jemalloc_sys as ffi;
 
     use super::JEAllocator;
+    use crate::mem_allocator::StdAllocator;
     use crate::runtime::ThreadTracker;
 
     #[cfg(any(target_arch = "arm", target_arch = "mips", target_arch = "powerpc"))]
@@ -77,6 +78,10 @@ pub mod linux {
     unsafe impl Allocator for JEAllocator {
         #[inline(always)]
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+            if ThreadTracker::is_crash() {
+                return StdAllocator::allocate(layout);
+            }
+
             ThreadTracker::alloc(layout.size() as i64)?;
 
             let data_address = if layout.size() == 0 {
@@ -92,6 +97,10 @@ pub mod linux {
 
         #[inline(always)]
         fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+            if ThreadTracker::is_crash() {
+                return StdAllocator::allocate_zeroed(layout);
+            }
+
             ThreadTracker::alloc(layout.size() as i64)?;
 
             let data_address = if layout.size() == 0 {
@@ -108,6 +117,10 @@ pub mod linux {
 
         #[inline(always)]
         unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+            if ThreadTracker::is_crash() {
+                return StdAllocator::deallocate(ptr, layout);
+            }
+
             ThreadTracker::dealloc(layout.size() as i64);
 
             if layout.size() == 0 {
@@ -126,6 +139,10 @@ pub mod linux {
         ) -> Result<NonNull<[u8]>, AllocError> {
             debug_assert_eq!(old_layout.align(), new_layout.align());
             debug_assert!(old_layout.size() <= new_layout.size());
+
+            if ThreadTracker::is_crash() {
+                return StdAllocator::grow(ptr, old_layout, new_layout);
+            }
 
             ThreadTracker::dealloc(old_layout.size() as i64);
             ThreadTracker::alloc(new_layout.size() as i64)?;
@@ -155,6 +172,10 @@ pub mod linux {
         ) -> Result<NonNull<[u8]>, AllocError> {
             debug_assert_eq!(old_layout.align(), new_layout.align());
             debug_assert!(old_layout.size() <= new_layout.size());
+
+            if ThreadTracker::is_crash() {
+                return StdAllocator::grow_zeroed(ptr, old_layout, new_layout);
+            }
 
             ThreadTracker::dealloc(old_layout.size() as i64);
             ThreadTracker::alloc(new_layout.size() as i64)?;
@@ -190,6 +211,10 @@ pub mod linux {
         ) -> Result<NonNull<[u8]>, AllocError> {
             debug_assert_eq!(old_layout.align(), new_layout.align());
             debug_assert!(old_layout.size() >= new_layout.size());
+
+            if ThreadTracker::is_crash() {
+                return StdAllocator::shrink(ptr, old_layout, new_layout);
+            }
 
             ThreadTracker::dealloc(old_layout.size() as i64);
             ThreadTracker::alloc(new_layout.size() as i64)?;

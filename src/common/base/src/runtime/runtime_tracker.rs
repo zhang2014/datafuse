@@ -249,6 +249,15 @@ impl ThreadTracker {
         StatBuffer::current().dealloc(size)
     }
 
+    #[inline]
+    pub fn is_crash() -> bool {
+        StatBuffer::current().is_crash()
+    }
+
+    pub fn set_crash() {
+        StatBuffer::current().set_crash();
+    }
+
     pub fn movein_memory(size: i64) {
         TRACKER.with(|tracker| {
             let thread_tracker = tracker.borrow();
