@@ -79,7 +79,7 @@ pub mod linux {
         #[inline(always)]
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
             if ThreadTracker::is_crash() {
-                return StdAllocator::allocate(layout);
+                return StdAllocator.allocate(layout);
             }
 
             ThreadTracker::alloc(layout.size() as i64)?;
@@ -98,7 +98,7 @@ pub mod linux {
         #[inline(always)]
         fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
             if ThreadTracker::is_crash() {
-                return StdAllocator::allocate_zeroed(layout);
+                return StdAllocator.allocate_zeroed(layout);
             }
 
             ThreadTracker::alloc(layout.size() as i64)?;
@@ -118,7 +118,7 @@ pub mod linux {
         #[inline(always)]
         unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
             if ThreadTracker::is_crash() {
-                return StdAllocator::deallocate(ptr, layout);
+                return StdAllocator.deallocate(ptr, layout);
             }
 
             ThreadTracker::dealloc(layout.size() as i64);
@@ -141,7 +141,7 @@ pub mod linux {
             debug_assert!(old_layout.size() <= new_layout.size());
 
             if ThreadTracker::is_crash() {
-                return StdAllocator::grow(ptr, old_layout, new_layout);
+                return StdAllocator.grow(ptr, old_layout, new_layout);
             }
 
             ThreadTracker::dealloc(old_layout.size() as i64);
@@ -174,7 +174,7 @@ pub mod linux {
             debug_assert!(old_layout.size() <= new_layout.size());
 
             if ThreadTracker::is_crash() {
-                return StdAllocator::grow_zeroed(ptr, old_layout, new_layout);
+                return StdAllocator.grow_zeroed(ptr, old_layout, new_layout);
             }
 
             ThreadTracker::dealloc(old_layout.size() as i64);
@@ -213,7 +213,7 @@ pub mod linux {
             debug_assert!(old_layout.size() >= new_layout.size());
 
             if ThreadTracker::is_crash() {
-                return StdAllocator::shrink(ptr, old_layout, new_layout);
+                return StdAllocator.shrink(ptr, old_layout, new_layout);
             }
 
             ThreadTracker::dealloc(old_layout.size() as i64);
