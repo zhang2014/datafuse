@@ -31,7 +31,6 @@ static MEM_STAT_BUFFER_SIZE: i64 = 4 * 1024 * 1024;
 /// A StatBuffer buffers stats changes in local variables, and periodically flush them to other storage such as an `Arc<T>` shared by several threads.
 #[derive(Clone)]
 pub struct StatBuffer {
-    crash_flag: bool,
     memory_usage: i64,
     // Whether to allow unlimited memory. Alloc memory will not panic if it is true.
     unlimited_flag: bool,
@@ -42,7 +41,6 @@ pub struct StatBuffer {
 impl StatBuffer {
     pub const fn empty(global_mem_stat: &'static MemStat) -> Self {
         Self {
-            crash_flag: false,
             memory_usage: 0,
             global_mem_stat,
             unlimited_flag: false,
@@ -52,14 +50,6 @@ impl StatBuffer {
 
     pub fn current() -> &'static mut StatBuffer {
         unsafe { &mut *addr_of_mut!(STAT_BUFFER) }
-    }
-
-    pub fn is_crash(&self) -> bool {
-        self.crash_flag
-    }
-
-    pub fn set_crash(&mut self) {
-        self.crash_flag = true;
     }
 
     pub fn is_unlimited(&self) -> bool {
