@@ -376,7 +376,7 @@ pub fn set_crash_hook(version: String) {
 #[cfg(not(target_os = "macos"))]
 fn open_pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
     unsafe {
-        let mut fds: [c_int; 2] = [0; 2];
+        let mut fds: [libc::c_int; 2] = [0; 2];
         if libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) != 0 {
             return Err(std::io::Error::last_os_error());
         }
