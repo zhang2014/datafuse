@@ -13,52 +13,70 @@
 // limitations under the License.
 
 use std::fs::File;
-use std::io::{BufRead, Write};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+use std::io::BufRead;
+use std::io::Write;
+use std::os::fd::FromRawFd;
+use std::os::fd::IntoRawFd;
+use std::os::fd::OwnedFd;
 #[cfg(test)]
 use std::ptr::addr_of_mut;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Duration;
-use backtrace::{Backtrace, BacktraceFrame};
-use bincode::config::BigEndian;
 
-use databend_common_base::runtime::{Thread, ThreadTracker};
+use backtrace::Backtrace;
+use backtrace::BacktraceFrame;
+use databend_common_base::runtime::Thread;
+use databend_common_base::runtime::ThreadTracker;
 
 use crate::panic_hook::captures_frames;
 
 struct CrashHandler {
-    version: String,
     write_file: File,
 }
 
 impl CrashHandler {
-    pub fn create(version: String, write_file: File) -> CrashHandler {
-        CrashHandler { version, write_file }
+    pub fn create(write_file: File) -> CrashHandler {
+        CrashHandler { write_file }
     }
 
-    pub fn recv_signal(&mut self, sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
-        // let file = unsafe { File::from_raw_fd(self.write_file.as_raw_fd()) };
-
+    pub fn recv_signal(&mut self, sig: i32, info: *mut libc::siginfo_t, _uc: *mut libc::c_void) {
         let mut writer = std::io::BufWriter::new(&mut self.write_file);
         let current_query_id = match ThreadTracker::query_id() {
             None => "Unknown",
             Some(query_id) => query_id,
         };
 
+        bincode::serde::encode_into_std_write(sig, &mut writer, bincode::config::standard())
+            .unwrap();
+
+        bincode::serde::encode_into_std_write(
+            unsafe { (*info).si_code },
+            &mut writer,
+            bincode::config::standard(),
+        )
+        .unwrap();
+
+        bincode::serde::encode_into_std_write(
+            unsafe { (*info).si_addr() as usize },
+            &mut writer,
+            bincode::config::standard(),
+        )
+        .unwrap();
+
         bincode::serde::encode_into_std_write(
             std::thread::current().id().as_u64(),
             &mut writer,
             bincode::config::standard(),
-        ).unwrap();
+        )
+        .unwrap();
 
         bincode::serde::encode_into_std_write(
             current_query_id,
             &mut writer,
             bincode::config::standard(),
-        ).unwrap();
-        // serde_json::to_writer(&mut writer, &std::thread::current().id().as_u64()).unwrap();
-        // serde_json::to_writer(&mut writer, &current_query_id).unwrap();
+        )
+        .unwrap();
 
         let mut frames = Vec::with_capacity(50);
         captures_frames(&mut frames);
@@ -67,20 +85,16 @@ impl CrashHandler {
             frames.len(),
             &mut writer,
             bincode::config::standard(),
-        ).unwrap();
-        // serde_json::to_writer(&mut writer, &frames.len()).unwrap();
+        )
+        .unwrap();
+
         writer.flush().unwrap();
 
         for frame in frames {
-            bincode::serde::encode_into_std_write(
-                frame,
-                &mut writer,
-                bincode::config::standard(),
-            ).unwrap();
-            // serde_json::to_writer(&mut writer, &frame).unwrap();
+            bincode::serde::encode_into_std_write(frame, &mut writer, bincode::config::standard())
+                .unwrap();
         }
 
-        // writer.write_all(b"\n").unwrap();
         writer.flush().unwrap();
         std::thread::sleep(Duration::from_secs(4));
         // unsafe { libc::close(self.write_file.as_raw_fd()); }
@@ -116,23 +130,21 @@ impl CrashHandler {
 
 static CRASH_HANDLER_LOCK: Mutex<Option<CrashHandler>> = Mutex::new(None);
 
-fn sigsegv_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
-    unsafe {
-        let mut address = String::from("null points");
+fn sigsegv_message(si_code: i32, si_addr: usize) -> String {
+    let mut address = String::from("null points");
 
-        if !(*info).si_addr().is_null() {
-            address = format!("{:#02x?}", (*info).si_addr() as usize);
-        }
-
-        format!(
-            "Signal {} ({}), si_code {} ({}), Address {}\n",
-            libc::SIGSEGV,
-            "SIGSEGV",
-            (*info).si_code,
-            "Unknown", // TODO: SEGV_MAPERR or SEGV_ACCERR
-            address,
-        )
+    if si_addr != 0 {
+        address = format!("{:#02x?}", si_addr);
     }
+
+    format!(
+        "Signal {} ({}), si_code {} ({}), Address {}\n",
+        libc::SIGSEGV,
+        "SIGSEGV",
+        si_code,
+        "Unknown", // TODO: SEGV_MAPERR or SEGV_ACCERR
+        address,
+    )
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
@@ -200,77 +212,58 @@ extern "C" {
 #[cfg(test)]
 static mut TEST_JMP_BUFFER: JmpBuffer = JmpBuffer::create();
 
-fn sigbus_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
-    unsafe {
-        format!(
-            "Signal {} ({}), si_code {} ({})\n",
-            libc::SIGBUS,
-            "SIGBUS",
-            (*info).si_code,
-            match (*info).si_code {
-                libc::BUS_ADRALN => "BUS_ADRALN, invalid address alignment",
-                libc::BUS_ADRERR => "BUS_ADRERR, non-existent physical address",
-                libc::BUS_OBJERR => "BUS_OBJERR, object specific hardware error",
-                _ => "Unknown",
-            },
-        )
-    }
+fn sigbus_message(si_code: i32) -> String {
+    format!(
+        "Signal {} ({}), si_code {} ({})\n",
+        libc::SIGBUS,
+        "SIGBUS",
+        si_code,
+        match si_code {
+            libc::BUS_ADRALN => "BUS_ADRALN, invalid address alignment",
+            libc::BUS_ADRERR => "BUS_ADRERR, non-existent physical address",
+            libc::BUS_OBJERR => "BUS_OBJERR, object specific hardware error",
+            _ => "Unknown",
+        },
+    )
 }
 
-fn sigill_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
-    unsafe {
-        format!(
-            "Signal {} ({}), si_code {} ({})， instruction address:{} \n",
-            libc::SIGILL,
-            "SIGILL",
-            (*info).si_code,
-            "Unknown", /* ILL_ILLOPC ILL_ILLOPN ILL_ILLADR ILL_ILLTRP ILL_PRVOPC ILL_PRVREG ILL_COPROC ILL_BADSTK, */
-            match (*info).si_addr().is_null() {
-                true => "null points".to_string(),
-                false => format!("{:#02x?}", (*info).si_addr() as usize),
-            },
-        )
-    }
+fn sigill_message(si_code: i32, si_addr: usize) -> String {
+    format!(
+        "Signal {} ({}), si_code {} ({})， instruction address:{} \n",
+        libc::SIGILL,
+        "SIGILL",
+        si_code,
+        "Unknown", /* ILL_ILLOPC ILL_ILLOPN ILL_ILLADR ILL_ILLTRP ILL_PRVOPC ILL_PRVREG ILL_COPROC ILL_BADSTK, */
+        match si_addr == 0 {
+            true => "null points".to_string(),
+            false => format!("{:#02x?}", si_addr),
+        },
+    )
 }
 
-fn sigfpe_message(info: *mut libc::siginfo_t, _: *mut libc::c_void) -> String {
-    unsafe {
-        format!(
-            "Signal {} ({}), si_code {} ({})， instruction address:{} \n",
-            libc::SIGFPE,
-            "SIGFPE",
-            (*info).si_code,
-            "Unknown", /* FPE_INTDIV FPE_INTOVF FPE_FLTDIV FPE_FLTOVF FPE_FLTUND FPE_FLTRES FPE_FLTINV FPE_FLTSUB */
-            match (*info).si_addr().is_null() {
-                true => "null points".to_string(),
-                false => format!("{:#02x?}", (*info).si_addr() as usize),
-            },
-        )
-    }
+fn sigfpe_message(si_code: i32, si_addr: usize) -> String {
+    format!(
+        "Signal {} ({}), si_code {} ({})， instruction address:{} \n",
+        libc::SIGFPE,
+        "SIGFPE",
+        si_code,
+        "Unknown", /* FPE_INTDIV FPE_INTOVF FPE_FLTDIV FPE_FLTOVF FPE_FLTUND FPE_FLTRES FPE_FLTINV FPE_FLTSUB */
+        match si_addr == 0 {
+            true => "null points".to_string(),
+            false => format!("{:#02x?}", si_addr),
+        },
+    )
 }
 
-fn signal_message(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) -> String {
+fn signal_message(sig: i32, si_code: i32, si_addr: usize) -> String {
     // https://pubs.opengroup.org/onlinepubs/007908799/xsh/signal.h.html
     match sig {
-        libc::SIGBUS => sigbus_message(info, uc),
-        libc::SIGILL => sigill_message(info, uc),
-        libc::SIGSEGV => sigsegv_message(info, uc),
-        libc::SIGFPE => sigfpe_message(info, uc),
-        _ => format!("Signal {}, si_code {}", sig, unsafe { (*info).si_code }),
+        libc::SIGBUS => sigbus_message(si_code),
+        libc::SIGILL => sigill_message(si_code, si_addr),
+        libc::SIGSEGV => sigsegv_message(si_code, si_addr),
+        libc::SIGFPE => sigfpe_message(si_code, si_addr),
+        _ => format!("Signal {}, si_code {}", sig, si_code),
     }
-}
-
-#[cfg(test)]
-static mut ERROR_MESSAGE: String = String::new();
-
-fn write_error(message: std::fmt::Arguments) {
-    #[cfg(test)]
-    unsafe {
-        ERROR_MESSAGE.push_str(&format!("{}\n", message))
-    };
-
-    #[cfg(not(test))]
-    eprintln!("{}", message);
 }
 
 unsafe extern "C" fn signal_handler(sig: i32, info: *mut libc::siginfo_t, uc: *mut libc::c_void) {
@@ -345,13 +338,11 @@ pub unsafe fn add_signal_stack(stack_bytes: usize) {
     }
 }
 
-pub fn set_crash_hook(version: String) {
+pub fn set_crash_hook(output: File) {
     let lock = CRASH_HANDLER_LOCK.lock();
     let mut guard = lock.unwrap_or_else(PoisonError::into_inner);
 
-    let (infile, outfile) = pipe_file().unwrap();
-
-    *guard = Some(CrashHandler::create(version, outfile));
+    *guard = Some(CrashHandler::create(output));
     unsafe {
         #[cfg(debug_assertions)]
         add_signal_stack(20 * 1024 * 1024);
@@ -368,9 +359,6 @@ pub fn set_crash_hook(version: String) {
             libc::SIGTRAP,
         ]);
     };
-
-
-    SignalListener::spawn(infile);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -405,32 +393,77 @@ fn open_pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
     }
 }
 
-fn pipe_file() -> std::io::Result<(File, File)> {
+pub fn pipe_file() -> std::io::Result<(File, File)> {
     let (ifd, ofd) = open_pipe()?;
 
-    unsafe { Ok((File::from_raw_fd(ifd.into_raw_fd()), File::from_raw_fd(ofd.into_raw_fd()))) }
+    unsafe {
+        Ok((
+            File::from_raw_fd(ifd.into_raw_fd()),
+            File::from_raw_fd(ofd.into_raw_fd()),
+        ))
+    }
 }
 
-struct SignalListener;
+pub struct SignalListener;
 
 impl SignalListener {
-    pub fn spawn(file: File) {
+    pub fn spawn(file: File, crash_version: String) {
         Thread::named_spawn(Some(String::from("SignalListener")), move || {
             let mut reader = std::io::BufReader::new(file);
             while let Ok(true) = reader.has_data_left() {
-                let tid: u64 = bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap();
-                let query_id: String = bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap();
-                let frame_size: usize = bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap();
+                let sig: i32 =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let si_code: i32 =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let si_addr: usize =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+
+                let crash_thread_id: u64 =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let crash_query_id: String =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let frame_size: usize =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
 
                 let mut frames = Vec::<BacktraceFrame>::with_capacity(frame_size);
-                for index in 0..frame_size {
-                    frames.push(bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap());
+                for _index in 0..frame_size {
+                    frames.push(
+                        bincode::serde::decode_from_reader(
+                            &mut reader,
+                            bincode::config::standard(),
+                        )
+                        .unwrap(),
+                    );
                 }
 
                 let mut backtrace = Backtrace::from(frames);
                 backtrace.resolve();
-                eprintln!("{:?}", backtrace);
-                log::info!("{:?}", backtrace);
+
+                eprintln!("{:#^80}", " Crash fault info ");
+                eprintln!("PID: {}", std::process::id());
+                eprintln!("TID: {}", crash_thread_id);
+                eprintln!("Version: {}", crash_version);
+                eprintln!("Timestamp(UTC): {}", chrono::Utc::now());
+                eprintln!("Timestamp(Local): {}", chrono::Local::now());
+                eprintln!("QueryId: {:?}", crash_query_id);
+                eprintln!("{}", signal_message(sig, si_code, si_addr));
+                eprintln!("Backtrace:\n {:?}", backtrace);
+
+                log::error!("{:#^80}", " Crash fault info ");
+                log::error!("PID: {}", std::process::id());
+                log::error!("TID: {}", crash_thread_id);
+                log::error!("Version: {}", crash_version);
+                log::error!("Timestamp(UTC): {}", chrono::Utc::now());
+                log::error!("Timestamp(Local): {}", chrono::Local::now());
+                log::error!("QueryId: {:?}", crash_query_id);
+                log::error!("{}", signal_message(sig, si_code, si_addr));
+                log::error!("Backtrace:\n {:?}", backtrace);
             }
         });
     }
@@ -438,14 +471,13 @@ impl SignalListener {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead, Read};
     use std::ptr::addr_of_mut;
-    use backtrace::{Backtrace, BacktraceFrame};
 
+    use backtrace::BacktraceFrame;
     use databend_common_base::runtime::ThreadTracker;
 
-    use crate::crash_hook::{open_pipe, pipe_file, sigsetjmp};
-    use crate::crash_hook::ERROR_MESSAGE;
+    use crate::crash_hook::pipe_file;
+    use crate::crash_hook::sigsetjmp;
     use crate::crash_hook::TEST_JMP_BUFFER;
     use crate::set_crash_hook;
 
@@ -453,18 +485,17 @@ mod tests {
     fn test_crash() {
         unsafe {
             let (input, output) = pipe_file().unwrap();
-            set_crash_hook(String::from("1.2.111"), output);
+            set_crash_hook(output);
             let mut reader = std::io::BufReader::new(input);
 
             for signal in [
                 libc::SIGSEGV,
-                // libc::SIGILL,
-                // libc::SIGBUS,
-                // libc::SIGFPE,
-                // libc::SIGSYS,
-                // libc::SIGTRAP,
+                libc::SIGILL,
+                libc::SIGBUS,
+                libc::SIGFPE,
+                libc::SIGSYS,
+                libc::SIGTRAP,
             ] {
-                // ERROR_MESSAGE = String::new();
                 let query_id = format!("Trakcing query id: {}", signal);
                 let mut tracking_payload = ThreadTracker::new_tracking_payload();
                 tracking_payload.query_id = Some(query_id.clone());
@@ -475,113 +506,40 @@ mod tests {
                     libc::raise(signal);
                 }
 
-                // Example:
-                // ############################### Crash fault info ###############################
-                // PID: 0
-                // Version: 1.2.111
-                // Timestamp(UTC): 2024-07-15 07:24:50.624669 UTC
-                // Timestamp(Local): 2024-07-15 15:24:50.624788 +08:00
-                // QueryId: "Trakcing query id: 11"
-                // Signal 11 (SIGSEGV), si_code 2 (Unknown), Address 0x10479d130
-                //
-                // Backtrace:
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ BACKTRACE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                //                               ⋮ 5 frames hidden ⋮
-                //  6: databend_common_tracing::panic_hook::backtrace::h205501a90720b8ac
-                //     at /Users/WinterZhang/Source/databend/src/common/tracing/src/panic_hook.rs:67
-                //       65 │ pub fn backtrace() -> String {
-                //       66 │     if should_backtrace() {
-                //       67 >         let backtrace = Backtrace::new();
-                //       68 │         let printer = BacktracePrinter::new()
-                //       69 │             .message("")
-                //  7: databend_common_tracing::crash_hook::CrashHandler::recv_signal::hfbc5155e9fe371e2
-                //     at /Users/WinterZhang/Source/databend/src/common/tracing/src/crash_hook.rs:31
-                //       29 │             write_error(format_args!("QueryId: {:?}", current_query_id));
-                //       30 │             write_error(format_args!("{}", signal_message(sig, info, uc)));
-                //       31 >             write_error(format_args!("Backtrace:\n{}", backtrace()));
-                //       32 │         }
-                //       33 │     }
-                //  8: databend_common_tracing::crash_hook::signal_handler::h8f436acfc653eadf
-                //     at /Users/WinterZhang/Source/databend/src/common/tracing/src/crash_hook.rs:202
-                //      200 │
-                //      201 │     if let Some(crash_handler) = guard.as_ref() {
-                //      202 >         crash_handler.recv_signal(sig, info, uc);
-                //      203 │     }
-                //      204 │
-                //  9: _OSAtomicTestAndClearBarrier
-                //     at <unknown source file>
-                // 10: __pthread_atfork_prepare_handlers
-                //     at <unknown source file>
-                // 11: databend_common_tracing::crash_hook::tests::test_crash::hb571a3876f0deaa5
-                //     at /Users/WinterZhang/Source/databend/src/common/tracing/src/crash_hook.rs:274
-                //      272 │
-                //      273 │                 if sigsetjmp(addr_of_mut!(TEST_JMP_BUFFER), 1) == 0 {
-                //      274 >                     libc::raise(signal);
-                //      275 │                 }
-                //      276 │
-                // 12: databend_common_tracing::crash_hook::tests::test_crash::{{closure}}::h85bf763847dcff53
-                //     at /Users/WinterZhang/Source/databend/src/common/tracing/src/crash_hook.rs:261
-                //      259 │
-                //      260 │     #[test]
-                //      261 >     fn test_crash() {
-                //      262 │         unsafe {
-                //      263 │             set_crash_hook(String::from("1.2.111"));
-                // 14: core::ops::function::FnOnce::call_once::h31eb0fafb294dd12
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/core/src/ops/function.rs:250
-                // 15: test::__rust_begin_short_backtrace::h6fac42d75080a771
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/test/src/lib.rs:620
-                // 16: test::run_test_in_process::{{closure}}::h55d5037f9addec80
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/test/src/lib.rs:643
-                // 17: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once::hdb2a8a04750edb82
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/core/src/panic/unwind_safe.rs:272
-                // 18: std::panicking::try::do_call::h6d5a55026eb7cc8c
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/std/src/panicking.rs:554
-                // 19: std::panicking::try::h64d2a41424d099bc
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/std/src/panicking.rs:518
-                // 20: std::panic::catch_unwind::hc4df77f0513e1be7
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/std/src/panic.rs:142
-                // 21: test::run_test_in_process::ha75b98814770ae24
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/test/src/lib.rs:643
-                // 22: test::run_test::{{closure}}::h7f301602b56ea75e
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/test/src/lib.rs:566
-                // 23: test::run_test::{{closure}}::hfbc0ddafa8073094
-                //     at /rustc/8ace7ea1f7cbba7b4f031e66c54ca237a0d65de6/library/test/src/lib.rs:594
-                //                               ⋮ 12 frames hidden ⋮
+                let sig: i32 =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let _si_code: i32 =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let _si_addr: usize =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
 
-                // assert!(!ERROR_MESSAGE.is_empty());
-                // assert!(ERROR_MESSAGE.contains("1.2.111"));
-                // assert!(ERROR_MESSAGE.contains(&query_id));
-                // assert!(ERROR_MESSAGE.contains(&format!("Signal {}", signal)));
-                // assert!(ERROR_MESSAGE.contains("Backtrace"));
-                // assert!(ERROR_MESSAGE.contains("test_crash"));
-                // input.read_to_end()
-
-                let tid: u64 = bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap();
-                let query_id: String = bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap();
-                let frame_size: usize = bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap();
+                let _crash_thread_id: u64 =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let crash_query_id: String =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
+                let frame_size: usize =
+                    bincode::serde::decode_from_reader(&mut reader, bincode::config::standard())
+                        .unwrap();
 
                 let mut frames = Vec::<BacktraceFrame>::with_capacity(frame_size);
-                for index in 0..frame_size {
-                    frames.push(bincode::serde::decode_from_reader(&mut reader, bincode::config::standard()).unwrap());
+                for _index in 0..frame_size {
+                    frames.push(
+                        bincode::serde::decode_from_reader(
+                            &mut reader,
+                            bincode::config::standard(),
+                        )
+                        .unwrap(),
+                    );
                 }
-                //
-                let mut backtrace = Backtrace::from(frames);
-                backtrace.resolve();
-                eprintln!("{:?}", backtrace);
-                // let mut ss = String::new();
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", reader.read_line(&mut ss));
-                // println!("{:?}", ss);
-                // input.read_to_string(&mut ss).unwrap();
-                // eprintln!("{}", ss);
+
+                assert_eq!(sig, signal);
+                assert_eq!(crash_query_id, query_id);
+                assert!(!frames.is_empty());
             }
         }
     }

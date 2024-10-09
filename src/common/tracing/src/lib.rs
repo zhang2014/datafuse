@@ -24,6 +24,9 @@ mod loggers;
 mod panic_hook;
 mod structlog;
 
+pub use crash_hook::pipe_file;
+pub use crash_hook::SignalListener;
+
 pub use crate::config::Config;
 pub use crate::config::FileConfig;
 pub use crate::config::OTLPConfig;
