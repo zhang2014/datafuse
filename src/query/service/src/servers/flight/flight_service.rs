@@ -27,7 +27,7 @@ use tonic::transport::server::TcpIncoming;
 use tonic::transport::Identity;
 use tonic::transport::Server;
 use tonic::transport::ServerTlsConfig;
-use databend_common_base::runtime::defer;
+use databend_common_base::runtime::{CatchUnwindFuture, defer};
 
 use super::v1::DatabendQueryFlightService;
 use crate::servers::Server as DatabendQueryServer;
@@ -94,7 +94,7 @@ impl FlightService {
             let _ss = defer(|| {
                 log::error!("flight server is shutdown");
             });
-            if let Err(cause) = server.await {
+            if let Err(cause) = CatchUnwindFuture::create(server).await {
                 log::error!("cause : {:?}", cause);
                 return Err(cause);
             }
