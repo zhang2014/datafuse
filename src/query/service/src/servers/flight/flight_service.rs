@@ -27,6 +27,7 @@ use tonic::transport::server::TcpIncoming;
 use tonic::transport::Identity;
 use tonic::transport::Server;
 use tonic::transport::ServerTlsConfig;
+use databend_common_base::runtime::defer;
 
 use super::v1::DatabendQueryFlightService;
 use crate::servers::Server as DatabendQueryServer;
@@ -44,7 +45,7 @@ impl FlightService {
         }))
     }
 
-    fn shutdown_notify(&self) -> impl Future<Output = ()> + 'static {
+    fn shutdown_notify(&self) -> impl Future<Output=()> + 'static {
         let notified = self.abort_notify.clone();
         async move {
             notified.notified().await;
@@ -73,7 +74,7 @@ impl FlightService {
                     ))
                 })?)
                 .map_err(|e| {
-                    ErrorCode::TLSConfigurationFailure(format!("failed to invoke tls_config: {e}",))
+                    ErrorCode::TLSConfigurationFailure(format!("failed to invoke tls_config: {e}", ))
                 })?
         } else {
             builder
@@ -89,7 +90,12 @@ impl FlightService {
             )
             .serve_with_incoming_shutdown(incoming, self.shutdown_notify());
 
-        databend_common_base::runtime::spawn(server);
+        databend_common_base::runtime::spawn(async move {
+            let _ss = defer(|| {
+                log::error!("flight server is shutdown");
+            });
+            server.await
+        });
         Ok(())
     }
 }
