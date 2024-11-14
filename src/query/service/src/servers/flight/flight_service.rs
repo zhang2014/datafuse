@@ -94,7 +94,12 @@ impl FlightService {
             let _ss = defer(|| {
                 log::error!("flight server is shutdown");
             });
-            server.await
+            if let Err(cause) = server.await {
+                log::error!("cause : {:?}", cause);
+                return Err(cause);
+            }
+
+            Ok(())
         });
         Ok(())
     }
