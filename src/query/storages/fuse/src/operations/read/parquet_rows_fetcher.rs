@@ -218,6 +218,12 @@ impl<const BLOCKING_IO: bool> ParquetRowsFetcher<BLOCKING_IO> {
                     .await?;
 
                 let blocks = compact_segment_info.block_metas()?;
+                log::info!(
+                    "parquet rows fetcher read snapshot: {:?}, segment location {:?}, block len: {}",
+                    snapshot.snapshot_id,
+                    location,
+                    blocks.len()
+                );
                 e.insert(blocks);
             }
 
