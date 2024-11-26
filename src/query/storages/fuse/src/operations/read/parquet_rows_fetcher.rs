@@ -211,7 +211,7 @@ impl<const BLOCKING_IO: bool> ParquetRowsFetcher<BLOCKING_IO> {
                     .segment_reader
                     .read(&LoadParams {
                         ver,
-                        location,
+                        location: location.clone(),
                         len_hint: None,
                         put_cache: true,
                     })
