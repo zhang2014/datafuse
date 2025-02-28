@@ -61,10 +61,10 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
         let mut base_ptr = base.as_non_null_ptr();
 
         unsafe {
-            if !MemStatBuffer::current().unlimited_flag {
-                let _guard = LimitMemGuard::enter_unlimited();
-                eprintln!("write meta address {} to base {}", address, base_ptr.as_ptr() as usize);
-            }
+            // if !MemStatBuffer::current().unlimited_flag {
+            //     let _guard = LimitMemGuard::enter_unlimited();
+            //     eprintln!("write meta address {} to base {}", address, base_ptr.as_ptr() as usize);
+            // }
 
             base_ptr
                 .add(layout.size())
@@ -113,10 +113,10 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
             return Some(adjusted_layout);
         }
 
-        if !MemStatBuffer::current().unlimited_flag {
-            let _guard = LimitMemGuard::enter_unlimited();
-            eprintln!("dealloc meta address {} to base {}", mem_stat_address, ptr.as_ptr() as usize);
-        }
+        // if !MemStatBuffer::current().unlimited_flag {
+        //     let _guard = LimitMemGuard::enter_unlimited();
+            // eprintln!("dealloc meta address {} to base {}", mem_stat_address, ptr.as_ptr() as usize);
+        // }
 
         let mem_stat = Arc::from_raw(mem_stat_address as *const MemStat);
         MemStatBuffer::current().dealloc(&mem_stat, adjusted_layout.size() as i64, ptr.as_ptr() as usize);
