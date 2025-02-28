@@ -28,6 +28,7 @@ use crate::pipelines::processors::transforms::hash_join::HashJoinProbeState;
 use crate::pipelines::processors::transforms::hash_join::ProbeState;
 
 impl HashJoinProbeState {
+    #[inline(never)]
     pub(crate) fn right_semi_anti_join<'a, H: HashJoinHashtableLike>(
         &self,
         probe_state: &mut ProbeState,
@@ -110,6 +111,7 @@ impl HashJoinProbeState {
         Ok(vec![])
     }
 
+    #[inline(never)]
     pub(crate) fn right_semi_anti_join_with_conjunct<'a, H: HashJoinHashtableLike>(
         &self,
         probe_state: &mut ProbeState,

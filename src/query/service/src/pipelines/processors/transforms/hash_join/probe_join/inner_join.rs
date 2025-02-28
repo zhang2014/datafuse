@@ -30,6 +30,7 @@ use crate::pipelines::processors::transforms::hash_join::ProbeState;
 use crate::pipelines::processors::transforms::ProcessState;
 
 impl HashJoinProbeState {
+    #[inline(never)]
     pub(crate) fn inner_join<
         'a,
         H: HashJoinHashtableLike,

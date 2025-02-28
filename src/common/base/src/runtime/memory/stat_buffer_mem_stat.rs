@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::alloc::AllocError;
-use std::ptr::addr_of_mut;
+use std::ptr::{addr_of_mut, NonNull};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ pub struct MemStatBuffer {
     pub(crate) cur_mem_stat: Option<Arc<MemStat>>,
     pub(crate) memory_usage: i64,
     // Whether to allow unlimited memory. Alloc memory will not panic if it is true.
-    unlimited_flag: bool,
+    pub(crate) unlimited_flag: bool,
     pub(crate) global_mem_stat: &'static MemStat,
     destroyed_thread_local_macro: bool,
 }
@@ -90,6 +90,9 @@ impl MemStatBuffer {
     }
 
     pub fn alloc(&mut self, mem_stat: &Arc<MemStat>, usage: i64) -> Result<(), AllocError> {
+        debug_assert_eq!(Arc::weak_count(mem_stat), 0, "{}, {}, {}", Arc::weak_count(mem_stat), Arc::strong_count(mem_stat), usage);
+        debug_assert_ne!(Arc::strong_count(mem_stat), 0, "{}, {}, {}", Arc::weak_count(mem_stat), Arc::strong_count(mem_stat), usage);
+
         if self.destroyed_thread_local_macro {
             let used = mem_stat.used.fetch_add(usage, Ordering::Relaxed);
             mem_stat
@@ -131,6 +134,9 @@ impl MemStatBuffer {
     }
 
     pub fn force_alloc(&mut self, mem_stat: &Arc<MemStat>, memory_usage: i64) {
+        debug_assert_eq!(Arc::weak_count(mem_stat), 0, "{}, {}, {}", Arc::weak_count(mem_stat), Arc::strong_count(mem_stat), memory_usage);
+        debug_assert_ne!(Arc::strong_count(mem_stat), 0, "{}, {}, {}", Arc::weak_count(mem_stat), Arc::strong_count(mem_stat), memory_usage);
+
         if self.destroyed_thread_local_macro {
             let used = mem_stat.used.fetch_add(memory_usage, Ordering::Relaxed);
             mem_stat
@@ -152,20 +158,16 @@ impl MemStatBuffer {
         }
     }
 
-    pub fn dealloc(&mut self, mem_stat: &Arc<MemStat>, memory_usage: i64) {
+    pub fn dealloc(&mut self, mem_stat: &Arc<MemStat>, memory_usage: i64, ptr: usize) {
+        debug_assert_eq!(Arc::weak_count(mem_stat), 0, "{}, {}, {} {} {}", Arc::weak_count(mem_stat), Arc::strong_count(mem_stat), memory_usage, Arc::as_ptr(mem_stat) as usize, ptr);
+        debug_assert_ne!(Arc::strong_count(mem_stat), 0, "{}, {}, {} {} {}", Arc::weak_count(mem_stat), Arc::strong_count(mem_stat), memory_usage, Arc::as_ptr(mem_stat) as usize, ptr);
+
         let memory_usage = -memory_usage;
 
         if self.destroyed_thread_local_macro {
             mem_stat.used.fetch_add(memory_usage, Ordering::Relaxed);
             return;
         }
-
-        debug_assert_eq!(
-            Arc::weak_count(mem_stat),
-            0,
-            "mem stat address {}",
-            Arc::as_ptr(mem_stat) as usize
-        );
 
         if mem_stat.id != self.cur_mem_stat_id {
             if Arc::strong_count(mem_stat) == 1 {
@@ -304,15 +306,15 @@ mod tests {
         let mem_stat = MemStat::create(String::from("test"));
         let _shared = mem_stat.clone();
 
-        buffer.dealloc(&mem_stat, 1);
+        buffer.dealloc(&mem_stat, 1, 0);
         assert_eq!(mem_stat.used.load(Ordering::Relaxed), 0);
         assert_eq!(TEST_GLOBAL.used.load(Ordering::Relaxed), 0);
 
-        buffer.dealloc(&mem_stat, MEM_STAT_BUFFER_SIZE - 2);
+        buffer.dealloc(&mem_stat, MEM_STAT_BUFFER_SIZE - 2, 0);
         assert_eq!(mem_stat.used.load(Ordering::Relaxed), 0);
         assert_eq!(TEST_GLOBAL.used.load(Ordering::Relaxed), 0);
 
-        buffer.dealloc(&mem_stat, 1);
+        buffer.dealloc(&mem_stat, 1, 0);
         assert_eq!(mem_stat.used.load(Ordering::Relaxed), -MEM_STAT_BUFFER_SIZE);
         assert_eq!(
             TEST_GLOBAL.used.load(Ordering::Relaxed),
@@ -332,16 +334,16 @@ mod tests {
         let mem_stat_2 = MemStat::create(String::from("test"));
         let _shared = (mem_stat_1.clone(), mem_stat_2.clone());
 
-        buffer.dealloc(&mem_stat_1, 1);
+        buffer.dealloc(&mem_stat_1, 1, 0);
         assert_eq!(mem_stat_1.used.load(Ordering::Relaxed), 0);
         assert_eq!(mem_stat_2.used.load(Ordering::Relaxed), 0);
         assert_eq!(TEST_GLOBAL.used.load(Ordering::Relaxed), 0);
-        buffer.dealloc(&mem_stat_2, 1);
+        buffer.dealloc(&mem_stat_2, 1, 0);
         assert_eq!(mem_stat_1.used.load(Ordering::Relaxed), -1);
         assert_eq!(mem_stat_2.used.load(Ordering::Relaxed), 0);
         assert_eq!(TEST_GLOBAL.used.load(Ordering::Relaxed), -1);
 
-        buffer.dealloc(&mem_stat_1, 1);
+        buffer.dealloc(&mem_stat_1, 1, 0);
         assert_eq!(mem_stat_1.used.load(Ordering::Relaxed), -1);
         assert_eq!(mem_stat_2.used.load(Ordering::Relaxed), -1);
         assert_eq!(TEST_GLOBAL.used.load(Ordering::Relaxed), -2);
@@ -357,12 +359,12 @@ mod tests {
 
         let mem_stat = MemStat::create(String::from("test"));
 
-        buffer.dealloc(&mem_stat, 1);
+        buffer.dealloc(&mem_stat, 1, 0);
         let _ = GlobalStatBuffer::current().flush::<false>(0);
         assert_eq!(mem_stat.used.load(Ordering::Relaxed), -1);
         assert_eq!(TEST_GLOBAL.used.load(Ordering::Relaxed), -1);
 
-        buffer.dealloc(&mem_stat, MEM_STAT_BUFFER_SIZE - 2);
+        buffer.dealloc(&mem_stat, MEM_STAT_BUFFER_SIZE - 2, 0);
         assert_eq!(
             mem_stat.used.load(Ordering::Relaxed),
             -(MEM_STAT_BUFFER_SIZE - 1)
@@ -372,7 +374,7 @@ mod tests {
             -(MEM_STAT_BUFFER_SIZE - 1)
         );
 
-        buffer.dealloc(&mem_stat, 1);
+        buffer.dealloc(&mem_stat, 1, 0);
         assert_eq!(mem_stat.used.load(Ordering::Relaxed), -MEM_STAT_BUFFER_SIZE);
         assert_eq!(
             TEST_GLOBAL.used.load(Ordering::Relaxed),

@@ -20,7 +20,7 @@ use std::ptr::slice_from_raw_parts_mut;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use crate::runtime::GlobalStatBuffer;
+use crate::runtime::{GlobalStatBuffer, LimitMemGuard};
 use crate::runtime::MemStat;
 use crate::runtime::MemStatBuffer;
 use crate::runtime::ThreadTracker;
@@ -61,10 +61,17 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
         let mut base_ptr = base.as_non_null_ptr();
 
         unsafe {
+            if !MemStatBuffer::current().unlimited_flag {
+                let _guard = LimitMemGuard::enter_unlimited();
+                eprintln!("write meta address {} to base {}", address, base_ptr.as_ptr() as usize);
+            }
+
             base_ptr
                 .add(layout.size())
                 .cast::<usize>()
                 .write_unaligned(address);
+
+            libc::mprotect(base_ptr.add(layout.size()).cast::<libc::c_void>().as_ptr(), std::mem::size_of::<usize>(), libc::PROT_READ);
 
             NonNull::new_unchecked(slice_from_raw_parts_mut(base_ptr.as_mut(), layout.size()))
         }
@@ -75,7 +82,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
         MemStatBuffer::current().alloc(stat, adjusted_layout.size() as i64)?;
 
         let Ok(allocated_ptr) = self.inner.allocate(adjusted_layout) else {
-            MemStatBuffer::current().dealloc(stat, adjusted_layout.size() as i64);
+            MemStatBuffer::current().dealloc(stat, adjusted_layout.size() as i64, 0);
             return Err(AllocError);
         };
 
@@ -92,7 +99,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
         MemStatBuffer::current().alloc(stat, adjusted_layout.size() as i64)?;
 
         let Ok(allocated_ptr) = self.inner.allocate_zeroed(adjusted_layout) else {
-            MemStatBuffer::current().dealloc(stat, adjusted_layout.size() as i64);
+            MemStatBuffer::current().dealloc(stat, adjusted_layout.size() as i64, 0);
             return Err(AllocError);
         };
 
@@ -108,8 +115,13 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
             return Some(adjusted_layout);
         }
 
+        if !MemStatBuffer::current().unlimited_flag {
+            let _guard = LimitMemGuard::enter_unlimited();
+            eprintln!("dealloc meta address {} to base {}", mem_stat_address, ptr.as_ptr() as usize);
+        }
+
         let mem_stat = Arc::from_raw(mem_stat_address as *const MemStat);
-        MemStatBuffer::current().dealloc(&mem_stat, adjusted_layout.size() as i64);
+        MemStatBuffer::current().dealloc(&mem_stat, adjusted_layout.size() as i64, ptr.as_ptr() as usize);
         self.inner.deallocate(ptr, adjusted_layout);
         None
     }
@@ -127,7 +139,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
 
         let Ok(grow_ptr) = self.inner.grow(ptr, old_layout, new_adjusted_layout) else {
             GlobalStatBuffer::current().force_alloc(old_layout.size() as i64);
-            MemStatBuffer::current().dealloc(stat, new_adjusted_layout.size() as i64);
+            MemStatBuffer::current().dealloc(stat, new_adjusted_layout.size() as i64, 0);
             return Err(AllocError);
         };
 
@@ -169,7 +181,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
             .inner
             .grow(ptr, old_adjusted_layout, new_adjusted_layout)
         else {
-            MemStatBuffer::current().dealloc(&stat, diff as i64);
+            MemStatBuffer::current().dealloc(&stat, diff as i64, 0);
             return Err(AllocError);
         };
 
@@ -190,7 +202,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
 
         let Ok(grow_ptr) = self.inner.grow_zeroed(ptr, old_layout, new_adjusted_layout) else {
             GlobalStatBuffer::current().force_alloc(old_layout.size() as i64);
-            MemStatBuffer::current().dealloc(stat, new_adjusted_layout.size() as i64);
+            MemStatBuffer::current().dealloc(stat, new_adjusted_layout.size() as i64, 0);
             return Err(AllocError);
         };
 
@@ -233,7 +245,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
             .inner
             .grow_zeroed(ptr, old_adjusted_layout, new_adjusted_layout)
         else {
-            MemStatBuffer::current().dealloc(&stat, alloc_size as i64);
+            MemStatBuffer::current().dealloc(&stat, alloc_size as i64, 0);
             return Err(AllocError);
         };
 
@@ -271,7 +283,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
         };
 
         let mem_stat = Arc::from_raw(mem_stat_address as *const MemStat);
-        MemStatBuffer::current().dealloc(&mem_stat, old_adjusted_layout.size() as i64);
+        MemStatBuffer::current().dealloc(&mem_stat, old_adjusted_layout.size() as i64, 0);
         GlobalStatBuffer::current().force_alloc(new_layout.size() as i64);
         Ok(reduced_ptr)
     }
@@ -303,7 +315,7 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
 
         let alloc_size = old_adjusted_layout.size() - new_adjusted_layout.size();
         let stat = ManuallyDrop::new(Arc::from_raw(address as *const MemStat));
-        MemStatBuffer::current().dealloc(&stat, alloc_size as i64);
+        MemStatBuffer::current().dealloc(&stat, alloc_size as i64, 0);
 
         let Ok(ptr) = self
             .inner
@@ -1174,9 +1186,9 @@ mod tests {
                     MemStatBuffer::current().memory_usage
                         + GlobalStatBuffer::current().memory_usage
                         + GlobalStatBuffer::current()
-                            .global_mem_stat
-                            .used
-                            .load(Ordering::Relaxed)
+                        .global_mem_stat
+                        .used
+                        .load(Ordering::Relaxed)
                 );
 
                 for (ptr, layout) in allocations {
@@ -1326,8 +1338,8 @@ mod tests {
                     handles.push(Thread::spawn(move || {
                         let test_function = |mem_stat: Arc<MemStat>,
                                              allocator: Arc<
-                            dyn Allocator + Send + Sync + 'static,
-                        >| {
+                                                 dyn Allocator + Send + Sync + 'static,
+                                             >| {
                             let layout = Layout::from_size_align(512 * (i + 1), 8).unwrap();
                             let ptr = allocator.allocate(layout).unwrap();
 

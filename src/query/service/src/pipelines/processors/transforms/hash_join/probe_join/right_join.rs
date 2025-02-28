@@ -31,6 +31,7 @@ use crate::pipelines::processors::transforms::hash_join::ProbeState;
 use crate::sql::plans::JoinType;
 
 impl HashJoinProbeState {
+    #[inline(never)]
     pub(crate) fn probe_right_join<'a, H: HashJoinHashtableLike>(
         &self,
         probe_state: &mut ProbeState,
