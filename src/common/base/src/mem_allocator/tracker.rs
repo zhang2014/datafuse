@@ -71,8 +71,6 @@ impl<T: Allocator> MetaTrackerAllocator<T> {
                 .cast::<usize>()
                 .write_unaligned(address);
 
-            libc::mprotect(base_ptr.add(layout.size()).cast::<libc::c_void>().as_ptr(), std::mem::size_of::<usize>(), libc::PROT_READ);
-
             NonNull::new_unchecked(slice_from_raw_parts_mut(base_ptr.as_mut(), layout.size()))
         }
     }
