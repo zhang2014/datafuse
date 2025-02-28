@@ -55,6 +55,10 @@ impl HashJoinProbeState {
             .input
             .get_by_offset(0)
             .to_column(process_state.input.num_rows());
+        if let Some(v) = process_state.input.get_meta() {
+            eprintln!("v {:?}", serde_json::to_string(v));
+        }
+
         // Check if there is any null in the probe column.
         if matches!(probe_column.validity().1, Some(x) if x.null_count() > 0) {
             let mut has_null = self
@@ -300,7 +304,7 @@ impl HashJoinProbeState {
         Ok(vec![])
     }
 
-    #[inline]
+    #[inline(never)]
     #[allow(clippy::too_many_arguments)]
     fn process_left_mark_join_block(
         &self,
