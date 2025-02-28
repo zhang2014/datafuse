@@ -132,7 +132,7 @@ impl HashJoinProbeState {
             self.process_left_mark_join_block(&build_indexes[0..matched_idx], mark_scan_map)?;
         }
 
-        drop(keys);
+        // drop(keys);
         probe_state.process_state = None;
 
         Ok(vec![])
