@@ -23,7 +23,7 @@ use crate::mem_allocator::tracker::MetaTrackerAllocator;
 use crate::mem_allocator::DefaultAllocator;
 
 pub type DefaultGlobalAllocator = GlobalAllocator<DefaultAllocator>;
-pub type TrackingGlobalAllocator = GlobalAllocator<MetaTrackerAllocator<DefaultAllocator>>;
+pub type TrackingGlobalAllocator = GlobalAllocator<DefaultAllocator>;
 
 /// Global allocator, default is JeAllocator.
 
