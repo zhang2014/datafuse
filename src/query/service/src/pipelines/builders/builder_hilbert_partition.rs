@@ -49,6 +49,7 @@ impl PipelineBuilder {
         self.main_pipeline.exchange(
             num_processors,
             HilbertPartitionExchange::create(partition.num_partitions),
+            false,
         );
 
         let settings = self.ctx.get_settings();

@@ -62,6 +62,7 @@ impl ExchangeSink {
                             compression,
                             Arc::new(Box::new(MergeFlightScatter)),
                         ),
+                        false
                     ),
                     false => pipeline.exchange(
                         1,
@@ -70,6 +71,7 @@ impl ExchangeSink {
                             compression,
                             Arc::new(Box::new(MergeFlightScatter)),
                         ),
+                        false,
                     ),
                 };
 

@@ -72,6 +72,7 @@ pub fn exchange_shuffle(
                 compression,
                 params.shuffle_scatter.clone(),
             ),
+            false
         ),
         false => pipeline.exchange(
             params.destination_ids.len(),
@@ -80,6 +81,7 @@ pub fn exchange_shuffle(
                 compression,
                 params.shuffle_scatter.clone(),
             ),
+            false
         ),
     };
 

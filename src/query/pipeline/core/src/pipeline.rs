@@ -448,7 +448,7 @@ impl Pipeline {
         }
     }
 
-    pub fn exchange<T: Exchange>(&mut self, n: usize, exchange: Arc<T>) {
+    pub fn exchange<T: Exchange>(&mut self, n: usize, exchange: Arc<T>, debug: bool) {
         if let Some(pipe) = self.pipes.last() {
             if pipe.output_length < 1 {
                 return;
@@ -493,6 +493,8 @@ impl Pipeline {
                         inputs.clone(),
                         output.clone(),
                         exchange.clone(),
+                        debug,
+                        _index
                     ),
                     inputs,
                     vec![output],

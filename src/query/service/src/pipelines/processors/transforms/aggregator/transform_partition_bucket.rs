@@ -50,7 +50,7 @@ pub fn build_final_aggregate(
     let pipe_size = settings.get_max_threads()? as usize;
 
     // 1. resorting partition
-    pipeline.exchange(1, Arc::new(ResortingPartition::create()));
+    pipeline.exchange(1, Arc::new(ResortingPartition::create()), false);
 
     // 2. align partitions
     pipeline.add_transform(|input, output| {
@@ -93,7 +93,7 @@ pub fn build_final_aggregate(
 
     // 5. exchange local
     let pipe_size = pipeline.output_len();
-    pipeline.exchange(pipe_size, ExchangePartition::create(params.clone()));
+    pipeline.exchange(pipe_size, ExchangePartition::create(params.clone()), true);
 
     pipeline.add_transform(|input, output| {
         CheckPartition::create(input, output, String::from("after exchange"))

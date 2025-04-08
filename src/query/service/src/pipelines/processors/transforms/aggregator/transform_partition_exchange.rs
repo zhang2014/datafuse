@@ -191,4 +191,16 @@ impl Exchange for ExchangePartition {
             }
         }
     }
+
+    fn debug(&self, input: usize, output: usize, block: &DataBlock) {
+        let Some(meta) = block.get_meta() else {
+            unreachable!()
+        };
+
+        let Some(meta) = AggregateMeta::downcast_ref_from(meta) else {
+            unreachable!()
+        };
+
+        eprintln!("{} input push data to {}, {}-{}", input, output, meta.get_partition(), meta.get_sorting_partition());
+    }
 }

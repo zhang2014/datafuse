@@ -184,11 +184,13 @@ impl PipelineBuilder {
                     top_n.func,
                     num_partitions as u64,
                 ),
+                false,
             )
         } else {
             self.main_pipeline.exchange(
                 num_processors,
                 WindowPartitionExchange::create(partition_by.clone(), num_partitions),
+                false,
             );
         }
 

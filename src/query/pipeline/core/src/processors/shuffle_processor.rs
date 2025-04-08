@@ -65,6 +65,8 @@ pub trait Exchange: Send + Sync + 'static {
 
         position.map(|(idx, _)| idx)
     }
+
+    fn debug(&self, input: usize, output: usize, block: &DataBlock) {}
 }
 
 pub struct ShuffleProcessor {
@@ -350,6 +352,8 @@ pub struct MergePartitionProcessor<T: Exchange> {
     finished_inputs: usize,
     waiting_inputs: VecDeque<usize>,
     inputs_status: Vec<PortStatus>,
+    debug: bool,
+    index: usize,
 }
 
 impl<T: Exchange> MergePartitionProcessor<T> {
@@ -357,6 +361,8 @@ impl<T: Exchange> MergePartitionProcessor<T> {
         inputs: Vec<Arc<InputPort>>,
         output: Arc<OutputPort>,
         exchange: Arc<T>,
+        debug: bool,
+        index: usize,
     ) -> ProcessorPtr {
         let inputs_data = vec![None; inputs.len()];
         let inputs_status = vec![PortStatus::Idle; inputs.len()];
@@ -371,6 +377,8 @@ impl<T: Exchange> MergePartitionProcessor<T> {
             waiting_inputs,
             initialize: false,
             finished_inputs: 0,
+            debug,
+            index,
         }))
     }
 }
@@ -485,7 +493,10 @@ impl<T: Exchange> Processor for MergePartitionProcessor<T> {
 
         while !self.waiting_inputs.is_empty() && self.output.can_push() {
             let idx = self.waiting_inputs.pop_front().unwrap();
-            self.output.push_data(self.inputs[idx].pull_data().unwrap());
+
+            let data_block = self.inputs[idx].pull_data().unwrap()?;
+            self.exchange.debug(idx, self.index, &data_block);
+            self.output.push_data(Ok(data_block));
             self.inputs_status[idx] = PortStatus::Idle;
 
             if self.inputs[idx].is_finished() {
