@@ -76,7 +76,7 @@ pub struct TransformPartialAggregate {
     processed_rows: usize,
     settings: MemorySettings,
     configure_peer_nodes: Vec<String>,
-    spilling_state: Option<HashtableSpillingState>,
+    spilling_state: Option<Box<HashtableSpillingState>>,
     spiller: Spiller,
     output_blocks: Vec<DataBlock>,
 }
@@ -317,7 +317,7 @@ impl AccumulatingTransform for TransformPartialAggregate {
             }
 
             let max_bucket = self.configure_peer_nodes.len();
-            self.spilling_state = Some(HashtableSpillingState::create(ht, max_bucket));
+            self.spilling_state = Some(Box::new(HashtableSpillingState::create(ht, max_bucket)));
         }
 
         if let Some(spilling_state) = self.spilling_state.as_mut() {

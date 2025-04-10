@@ -38,10 +38,10 @@ pub use payload::*;
 pub use payload_flush::*;
 pub use probe_state::*;
 
-pub type SelectVector = Vec<usize>;
+pub type SelectVector = [usize; BATCH_SIZE];
 
 pub fn new_sel() -> SelectVector {
-    vec![0; BATCH_SIZE]
+    [0; BATCH_SIZE]
 }
 
 // A batch size to probe, flush, repartition, etc.
