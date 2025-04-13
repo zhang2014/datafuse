@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use databend_common_exception::Result;
@@ -19,6 +20,7 @@ use databend_common_expression::group_hash_columns;
 use databend_common_expression::DataBlock;
 use databend_common_expression::InputColumns;
 use databend_common_pipeline_core::processors::Exchange;
+use databend_common_pipeline_core::processors::ReadyPartition;
 
 use super::WindowPartitionMeta;
 
@@ -38,11 +40,16 @@ impl WindowPartitionExchange {
 
 impl Exchange for WindowPartitionExchange {
     const NAME: &'static str = "Window";
-    fn partition(&self, data_block: DataBlock, n: usize) -> Result<Vec<DataBlock>> {
-        let num_rows = data_block.num_rows();
+
+    fn partition(
+        &self,
+        block: DataBlock,
+        to: &mut Vec<VecDeque<DataBlock>>,
+    ) -> Result<ReadyPartition> {
+        let num_rows = block.num_rows();
 
         // Extract the columns used for hash computation.
-        let data_block = data_block.consume_convert_to_full();
+        let data_block = block.consume_convert_to_full();
         let hash_cols = InputColumns::new_block_proxy(&self.hash_keys, &data_block);
 
         // Compute the hash value for each row.
@@ -56,6 +63,7 @@ impl Exchange for WindowPartitionExchange {
             .collect::<Vec<_>>();
         let scatter_blocks = DataBlock::scatter(&data_block, &indices, self.num_partitions)?;
 
+        let n = scatter_blocks.len();
         // Partition the data blocks to different processors.
         let mut output_data_blocks = vec![vec![]; n];
         for (partition_id, data_block) in scatter_blocks.into_iter().enumerate() {
@@ -63,10 +71,12 @@ impl Exchange for WindowPartitionExchange {
         }
 
         // Union data blocks for each processor.
-        Ok(output_data_blocks
-            .into_iter()
-            .map(WindowPartitionMeta::create)
-            .map(DataBlock::empty_with_meta)
-            .collect())
+        for (index, blocks) in output_data_blocks.into_iter().enumerate() {
+            to[index].push_back(DataBlock::empty_with_meta(WindowPartitionMeta::create(
+                blocks,
+            )));
+        }
+
+        Ok(ReadyPartition::AllPartitionReady)
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use databend_common_exception::Result;
@@ -21,6 +22,7 @@ use databend_common_expression::DataBlock;
 use databend_common_expression::SortColumnDescription;
 use databend_common_expression::SortCompare;
 use databend_common_pipeline_core::processors::Exchange;
+use databend_common_pipeline_core::processors::ReadyPartition;
 
 use super::WindowPartitionMeta;
 use crate::sql::executor::physical_plans::WindowPartitionTopNFunc;
@@ -69,21 +71,28 @@ impl Exchange for WindowPartitionTopNExchange {
     const NAME: &'static str = "WindowTopN";
     const SKIP_EMPTY_DATA_BLOCK: bool = true;
 
-    fn partition(&self, block: DataBlock, n: usize) -> Result<Vec<DataBlock>> {
+    fn partition(
+        &self,
+        block: DataBlock,
+        to: &mut Vec<VecDeque<DataBlock>>,
+    ) -> Result<ReadyPartition> {
         let partition_permutation = self.partition_permutation(&block);
 
         // Partition the data blocks to different processors.
+        let n = partition_permutation.len();
         let mut output_data_blocks = vec![vec![]; n];
         for (partition_id, indices) in partition_permutation.into_iter().enumerate() {
             output_data_blocks[partition_id % n].push((partition_id, block.take(&indices)?));
         }
 
+        for (idx, blocks) in output_data_blocks.into_iter().enumerate() {
+            to[idx].push_back(DataBlock::empty_with_meta(WindowPartitionMeta::create(
+                blocks,
+            )));
+        }
+
         // Union data blocks for each processor.
-        Ok(output_data_blocks
-            .into_iter()
-            .map(WindowPartitionMeta::create)
-            .map(DataBlock::empty_with_meta)
-            .collect())
+        Ok(ReadyPartition::AllPartitionReady)
     }
 }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering as AtomicOrdering;
 
@@ -20,6 +21,7 @@ use databend_common_exception::Result;
 use databend_common_expression::BlockMetaInfoDowncast;
 use databend_common_expression::DataBlock;
 use databend_common_pipeline_core::processors::Exchange;
+use databend_common_pipeline_core::processors::ReadyPartition;
 
 use crate::pipelines::processors::transforms::aggregator::AggregateMeta;
 
@@ -43,22 +45,26 @@ impl Exchange for ResortingPartition {
     const NAME: &'static str = "PartitionResorting";
     const MULTIWAY_SORT: bool = true;
 
-    fn partition(&self, mut data_block: DataBlock, n: usize) -> Result<Vec<DataBlock>> {
-        debug_assert_eq!(n, 1);
-
-        let Some(meta) = data_block.take_meta() else {
-            return Ok(vec![data_block]);
+    fn partition(
+        &self,
+        mut block: DataBlock,
+        to: &mut Vec<VecDeque<DataBlock>>,
+    ) -> Result<ReadyPartition> {
+        let Some(meta) = block.take_meta() else {
+            unreachable!()
+            // return Ok(vec![data_block]);
         };
 
         let Some(_) = AggregateMeta::downcast_ref_from(&meta) else {
-            return Ok(vec![data_block]);
+            unreachable!()
         };
 
         let global_max_partition = self.global_max_partition.load(AtomicOrdering::SeqCst);
         let mut meta = AggregateMeta::downcast_from(meta).unwrap();
         meta.set_global_max_partition(global_max_partition);
 
-        Ok(vec![data_block.add_meta(Some(Box::new(meta)))?])
+        to[0].push_back(block.add_meta(Some(Box::new(meta)))?);
+        Ok(ReadyPartition::AllPartitionReady)
     }
 
     fn init_way(

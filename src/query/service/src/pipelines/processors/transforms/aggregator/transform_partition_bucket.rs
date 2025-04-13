@@ -46,12 +46,9 @@ pub fn build_final_aggregate(
 
     // 2. align partitions
     pipeline.add_transform(|input, output| {
-        Ok(ProcessorPtr::create(Box::new(TransformPartitionAlign::create(
-            ctx.clone(),
-            params.clone(),
-            input,
-            output,
-        )?)))
+        Ok(ProcessorPtr::create(Box::new(
+            TransformPartitionAlign::create(ctx.clone(), params.clone(), input, output)?,
+        )))
     })?;
 
     // 3. dispatch partition

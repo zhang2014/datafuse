@@ -34,12 +34,22 @@ pub enum MultiwayStrategy {
     Custom,
 }
 
+pub enum ReadyPartition {
+    NoReady,
+    AllPartitionReady,
+    PartialPartition(Vec<usize>),
+}
+
 pub trait Exchange: Send + Sync + 'static {
     const NAME: &'static str;
     const MULTIWAY_SORT: bool = false;
     const SKIP_EMPTY_DATA_BLOCK: bool = false;
 
-    fn partition(&self, data_block: DataBlock, n: usize) -> Result<Vec<DataBlock>>;
+    fn partition(
+        &self,
+        data_block: DataBlock,
+        to: &mut Vec<VecDeque<DataBlock>>,
+    ) -> Result<ReadyPartition>;
 
     fn init_way(&self, _index: usize, _first_data: &DataBlock) -> Result<()> {
         Ok(())
@@ -190,7 +200,8 @@ pub struct PartitionProcessor<T: Exchange> {
 
     exchange: Arc<T>,
     input_data: Option<DataBlock>,
-    partitioned_data: Vec<Option<DataBlock>>,
+    partitioned_data: Vec<VecDeque<DataBlock>>,
+    current_partition_data: Vec<VecDeque<DataBlock>>,
 
     index: usize,
     initialized: bool,
@@ -205,16 +216,24 @@ impl<T: Exchange> PartitionProcessor<T> {
         index: usize,
         barrier: Arc<Barrier>,
     ) -> ProcessorPtr {
-        let partitioned_data = vec![None; outputs.len()];
+        let mut partitioned_data = Vec::with_capacity(outputs.len());
+        let mut current_partition_data = Vec::with_capacity(outputs.len());
+
+        for _index in 0..outputs.len() {
+            partitioned_data.push(VecDeque::with_capacity(2));
+            current_partition_data.push(VecDeque::with_capacity(2));
+        }
+
         ProcessorPtr::create(Box::new(PartitionProcessor {
             input,
             outputs,
             exchange,
-            partitioned_data,
             input_data: None,
             initialized: !T::MULTIWAY_SORT,
             index,
             barrier,
+            partitioned_data,
+            current_partition_data,
         }))
     }
 }
@@ -235,23 +254,21 @@ impl<T: Exchange> Processor for PartitionProcessor<T> {
 
         for (index, output) in self.outputs.iter().enumerate() {
             if output.is_finished() {
-                self.partitioned_data[index].take();
+                self.partitioned_data[index].clear();
                 continue;
             }
 
             all_output_finished = false;
 
             if output.can_push() {
-                if let Some(block) = self.partitioned_data[index].take() {
-                    if !block.is_empty() || block.get_meta().is_some() {
-                        output.push_data(Ok(block));
-                    }
-
-                    continue;
+                if let Some(block) = self.partitioned_data[index].pop_front() {
+                    self.input.set_not_need_data();
+                    output.push_data(Ok(block));
+                    return Ok(Event::NeedConsume);
                 }
             }
 
-            if !output.can_push() || self.partitioned_data[index].is_some() {
+            if !output.can_push() || self.partitioned_data[index].is_empty() {
                 all_data_pushed_output = false;
             }
         }
@@ -303,19 +320,37 @@ impl<T: Exchange> Processor for PartitionProcessor<T> {
 
     fn process(&mut self) -> Result<()> {
         if let Some(block) = self.input_data.take() {
+            if block.is_empty() && block.get_meta().is_none() {
+                return Ok(());
+            }
+
             if T::SKIP_EMPTY_DATA_BLOCK && block.is_empty() {
                 return Ok(());
             }
 
-            let partitioned = self.exchange.partition(block, self.outputs.len())?;
-
-            if partitioned.is_empty() {
-                return Ok(());
-            }
-
-            assert_eq!(partitioned.len(), self.outputs.len());
-            for (index, block) in partitioned.into_iter().enumerate() {
-                self.partitioned_data[index] = Some(block);
+            match self
+                .exchange
+                .partition(block, &mut self.current_partition_data)?
+            {
+                ReadyPartition::NoReady => { /* do nothing */ }
+                ReadyPartition::AllPartitionReady => {
+                    for (index, block) in self.current_partition_data.iter_mut().enumerate() {
+                        while let Some(block) = block.pop_front() {
+                            if !block.is_empty() || block.get_meta().is_some() {
+                                self.partitioned_data[index].push_back(block);
+                            }
+                        }
+                    }
+                }
+                ReadyPartition::PartialPartition(ready_partition) => {
+                    for index in ready_partition {
+                        while let Some(block) = self.current_partition_data[index].pop_front() {
+                            if !block.is_empty() || block.get_meta().is_some() {
+                                self.partitioned_data[index].push_back(block);
+                            }
+                        }
+                    }
+                }
             }
         }
 

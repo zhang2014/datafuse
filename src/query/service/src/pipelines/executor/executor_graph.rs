@@ -392,14 +392,16 @@ impl ExecutingGraph {
                         state_guard_cache = Some(node.state.lock().unwrap());
                     }
 
-                    node.processor.event(event_cause)
+                    node.processor.event(event_cause.clone())
                 }?;
 
                 trace!(
-                    "node id: {:?}, name: {:?}, event: {:?}",
+                    "node id: {:?}, thread {:?}, name: {:?}, event: {:?}, cause: {:?}",
                     node.processor.id(),
+                    std::thread::current().id(),
                     node.processor.name(),
-                    event
+                    event,
+                    event_cause
                 );
                 let processor_state = match event {
                     Event::Finished => {

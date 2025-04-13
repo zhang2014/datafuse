@@ -83,7 +83,7 @@ impl PartitionedPayload {
         let payloads = (0..partition_count)
             .map(|_| {
                 Payload::new(
-                    arenas[0].clone(),
+                    vec![arenas[0].clone()],
                     group_types.clone(),
                     aggrs.clone(),
                     states_layout.clone(),

@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use databend_common_expression::DataBlock;
 use databend_common_expression::Payload;
 use databend_common_expression::PayloadFlushState;
 use databend_common_pipeline_core::processors::Exchange;
+use databend_common_pipeline_core::processors::ReadyPartition;
 use databend_common_settings::FlightCompression;
 
 use crate::pipelines::processors::transforms::aggregator::aggregate_meta::AggregateMeta;
@@ -113,25 +115,29 @@ impl<const MULTIWAY_SORT: bool> FlightExchange<MULTIWAY_SORT> {
 }
 
 impl<const MULTIWAY_SORT: bool> FlightExchange<MULTIWAY_SORT> {
-    fn default_partition(&self, data_block: DataBlock) -> Result<Vec<DataBlock>> {
+    fn default_partition(
+        &self,
+        block: DataBlock,
+        to: &mut [VecDeque<DataBlock>],
+    ) -> Result<ReadyPartition> {
         if self.node_list.is_empty() {
-            let data_block = serialize_block(0, 0, 0, data_block, &self.options)?;
-            return Ok(vec![data_block]);
+            to[0].push_back(serialize_block(0, 0, 0, block, &self.options)?);
+            return Ok(ReadyPartition::AllPartitionReady);
         }
 
-        let data_blocks = self.shuffle_scatter.execute(data_block)?;
+        let data_blocks = self.shuffle_scatter.execute(block)?;
 
-        let mut blocks = Vec::with_capacity(data_blocks.len());
+        // let mut blocks = Vec::with_capacity(data_blocks.len());
         for (idx, data_block) in data_blocks.into_iter().enumerate() {
             if self.node_list[idx] == self.local_id {
-                blocks.push(data_block);
+                to[idx].push_back(data_block);
                 continue;
             }
 
-            blocks.push(serialize_block(0, 0, 0, data_block, &self.options)?);
+            to[idx].push_back(serialize_block(0, 0, 0, data_block, &self.options)?);
         }
 
-        Ok(blocks)
+        Ok(ReadyPartition::AllPartitionReady)
     }
 }
 
@@ -139,29 +145,33 @@ impl<const MULTIWAY_SORT: bool> Exchange for FlightExchange<MULTIWAY_SORT> {
     const NAME: &'static str = "AggregateExchange";
     const MULTIWAY_SORT: bool = MULTIWAY_SORT;
 
-    fn partition(&self, mut data_block: DataBlock, n: usize) -> Result<Vec<DataBlock>> {
-        let Some(meta) = data_block.take_meta() else {
+    fn partition(
+        &self,
+        mut block: DataBlock,
+        to: &mut Vec<VecDeque<DataBlock>>,
+    ) -> Result<ReadyPartition> {
+        let Some(meta) = block.take_meta() else {
             // only exchange data
-            if data_block.is_empty() {
-                return Ok(vec![]);
+            if !block.is_empty() {
+                self.default_partition(block, to)?;
             }
 
-            return self.default_partition(data_block);
+            return Ok(ReadyPartition::AllPartitionReady);
         };
 
         let Some(_) = AggregateMeta::downcast_ref_from(&meta) else {
-            return self.default_partition(data_block.add_meta(Some(meta))?);
+            self.default_partition(block.add_meta(Some(meta))?, to)?;
+            return Ok(ReadyPartition::AllPartitionReady);
         };
 
         assert!(MULTIWAY_SORT);
-        assert_eq!(self.node_list_lookup.len(), n);
+        let n = self.node_list_lookup.len();
         match AggregateMeta::downcast_from(meta).unwrap() {
             AggregateMeta::FinalPartition => unreachable!(),
             AggregateMeta::InFlightPayload(_) => unreachable!(),
             AggregateMeta::SpilledPayload(v) => {
-                let mut blocks = Vec::with_capacity(n);
                 let global_max_partition = self.global_max_partition.load(AtomicOrdering::SeqCst);
-                for node_id in &self.node_list {
+                for (index, node_id) in self.node_list.iter().enumerate() {
                     let mut node_data_block = match *node_id == v.destination_node {
                         true => DataBlock::empty_with_meta(AggregateMeta::create_spilled_payload(
                             v.clone(),
@@ -185,21 +195,19 @@ impl<const MULTIWAY_SORT: bool> Exchange for FlightExchange<MULTIWAY_SORT> {
                         )?
                     }
 
-                    blocks.push(node_data_block);
+                    to[index].push_back(node_data_block);
                 }
-
-                Ok(blocks)
             }
             AggregateMeta::AggregatePayload(p) => {
                 if p.payload.len() == 0 {
-                    return Ok(vec![]);
+                    return Ok(ReadyPartition::NoReady);
                 }
 
-                let mut blocks = Vec::with_capacity(n);
+                // let mut blocks = Vec::with_capacity(n);
                 let global_max_partition = self.global_max_partition.load(AtomicOrdering::SeqCst);
                 for (idx, payload) in scatter_payload(p.payload, n)?.into_iter().enumerate() {
                     if self.node_list[idx] == self.local_id {
-                        blocks.push(DataBlock::empty_with_meta(
+                        to[idx].push_back(DataBlock::empty_with_meta(
                             AggregateMeta::create_agg_payload(
                                 payload,
                                 p.partition,
@@ -223,19 +231,18 @@ impl<const MULTIWAY_SORT: bool> Exchange for FlightExchange<MULTIWAY_SORT> {
                             global_max_partition,
                         )))?;
 
-                    let data_block = serialize_block(
+                    to[idx].push_back(serialize_block(
                         p.partition,
                         p.max_partition,
                         global_max_partition,
                         data_block,
                         &self.options,
-                    )?;
-                    blocks.push(data_block);
+                    )?);
                 }
-
-                Ok(blocks)
             }
-        }
+        };
+
+        Ok(ReadyPartition::AllPartitionReady)
     }
 
     fn init_way(&self, _index: usize, block: &DataBlock) -> Result<()> {

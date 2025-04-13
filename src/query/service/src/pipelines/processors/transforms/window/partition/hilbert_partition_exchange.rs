@@ -16,11 +16,13 @@
 // - https://github.com/ClickHouse/ClickHouse/blob/master/src/Processors/Transforms/WindowTransform.h
 // - https://github.com/ClickHouse/ClickHouse/blob/master/src/Processors/Transforms/WindowTransform.cpp
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use databend_common_exception::Result;
 use databend_common_expression::DataBlock;
 use databend_common_pipeline_core::processors::Exchange;
+use databend_common_pipeline_core::processors::ReadyPartition;
 
 use crate::pipelines::processors::transforms::WindowPartitionMeta;
 
@@ -36,8 +38,13 @@ impl HilbertPartitionExchange {
 
 impl Exchange for HilbertPartitionExchange {
     const NAME: &'static str = "Hilbert";
-    fn partition(&self, data_block: DataBlock, n: usize) -> Result<Vec<DataBlock>> {
-        let mut data_block = data_block;
+
+    fn partition(
+        &self,
+        block: DataBlock,
+        to: &mut Vec<VecDeque<DataBlock>>,
+    ) -> Result<ReadyPartition> {
+        let mut data_block = block;
         let range_ids = data_block
             .get_last_column()
             .as_number()
@@ -54,21 +61,23 @@ impl Exchange for HilbertPartitionExchange {
         let scatter_indices =
             DataBlock::divide_indices_by_scatter_size(&indices, self.num_partitions);
         // Partition the data blocks to different processors.
-        let mut output_data_blocks = vec![vec![]; n];
+        let mut output_data_blocks = vec![vec![]; self.num_partitions];
         for (partition_id, indices) in scatter_indices.iter().take(self.num_partitions).enumerate()
         {
             if indices.is_empty() {
                 continue;
             }
             let block = data_block.take_with_optimize_size(indices)?;
-            output_data_blocks[partition_id % n].push((partition_id, block));
+            output_data_blocks[partition_id % self.num_partitions].push((partition_id, block));
         }
 
         // Union data blocks for each processor.
-        Ok(output_data_blocks
-            .into_iter()
-            .map(WindowPartitionMeta::create)
-            .map(DataBlock::empty_with_meta)
-            .collect())
+        for (index, blocks) in output_data_blocks.into_iter().enumerate() {
+            to[index].push_back(DataBlock::empty_with_meta(WindowPartitionMeta::create(
+                blocks,
+            )));
+        }
+
+        Ok(ReadyPartition::AllPartitionReady)
     }
 }

@@ -42,4 +42,5 @@ pub use shuffle_processor::MergePartitionProcessor;
 pub use shuffle_processor::MultiwayStrategy;
 pub use shuffle_processor::OnePartitionProcessor;
 pub use shuffle_processor::PartitionProcessor;
+pub use shuffle_processor::ReadyPartition;
 pub use shuffle_processor::ShuffleProcessor;

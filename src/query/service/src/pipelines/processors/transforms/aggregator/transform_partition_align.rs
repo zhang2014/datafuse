@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use std::any::Any;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use bumpalo::Bump;
@@ -28,7 +29,10 @@ use databend_common_expression::PartitionedPayload;
 use databend_common_expression::Payload;
 use databend_common_expression::PayloadFlushState;
 use databend_common_expression::ProbeState;
-use databend_common_pipeline_core::processors::{Event, InputPort, OutputPort, Processor};
+use databend_common_pipeline_core::processors::Event;
+use databend_common_pipeline_core::processors::InputPort;
+use databend_common_pipeline_core::processors::OutputPort;
+use databend_common_pipeline_core::processors::Processor;
 use databend_common_pipeline_transforms::MemorySettings;
 
 use crate::pipelines::memory_settings::MemorySettingsExt;
@@ -55,7 +59,12 @@ pub struct TransformPartitionAlign {
 }
 
 impl TransformPartitionAlign {
-    pub fn create(ctx: Arc<QueryContext>, params: Arc<AggregatorParams>, input: Arc<InputPort>, output: Arc<OutputPort>) -> Result<Self> {
+    pub fn create(
+        ctx: Arc<QueryContext>,
+        params: Arc<AggregatorParams>,
+        input: Arc<InputPort>,
+        output: Arc<OutputPort>,
+    ) -> Result<Self> {
         let settings = MemorySettings::from_aggregate_settings(&ctx)?;
         Ok(TransformPartitionAlign {
             input,
@@ -85,10 +94,12 @@ impl TransformPartitionAlign {
             let ready_partition = self.partitions.take_partition(ready_partition_id);
 
             for (meta, data_block) in ready_partition {
-                self.output_data.push_back(data_block.add_meta(Some(Box::new(meta)))?);
+                self.output_data
+                    .push_back(data_block.add_meta(Some(Box::new(meta)))?);
             }
 
-            self.output_data.push_back(DataBlock::empty_with_meta(AggregateMeta::create_final()));
+            self.output_data
+                .push_back(DataBlock::empty_with_meta(AggregateMeta::create_final()));
         }
 
         Ok(())
@@ -195,7 +206,7 @@ impl TransformPartitionAlign {
             self.params.group_data_types.clone(),
             self.params.aggregate_functions.clone(),
             to as u64,
-            vec![from.payload.arena.clone()],
+            from.payload.arena.clone(),
         );
 
         let mut flush_state = PayloadFlushState::default();
@@ -213,7 +224,6 @@ impl TransformPartitionAlign {
         partitioned
     }
 }
-
 
 impl Processor for TransformPartitionAlign {
     fn name(&self) -> String {
@@ -290,7 +300,6 @@ impl Processor for TransformPartitionAlign {
         Ok(())
     }
 }
-
 
 // #[async_trait::async_trait]
 // impl AccumulatingTransform for TransformPartitionAlign {
