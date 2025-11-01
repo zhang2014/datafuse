@@ -665,7 +665,7 @@ impl QueryCoordinator {
         &mut self,
         target: String,
     ) -> Result<Receiver<std::result::Result<FlightData, Status>>> {
-        let (tx, rx) = async_channel::bounded(8);
+        let (tx, rx) = async_channel::unbounded();
         match self
             .statistics_exchanges
             .insert(target, FlightExchange::create_sender(tx))
@@ -697,7 +697,7 @@ impl QueryCoordinator {
         target: String,
         fragment: usize,
     ) -> Result<Receiver<std::result::Result<FlightData, Status>>> {
-        let (tx, rx) = async_channel::bounded(8);
+        let (tx, rx) = async_channel::unbounded();
         self.fragment_exchanges.insert(
             (target, fragment, FLIGHT_SENDER),
             FlightExchange::create_sender(tx),
@@ -729,7 +729,7 @@ impl QueryCoordinator {
 
                 for destination in &params.destination_ids {
                     exchanges.push(match destination == &params.executor_id {
-                        true => Ok(FlightSender::create(async_channel::bounded(1).0)),
+                        true => Ok(FlightSender::create(async_channel::unbounded().0)),
                         false => match self.fragment_exchanges.remove(&(
                             destination.clone(),
                             params.fragment_id,
@@ -766,7 +766,7 @@ impl QueryCoordinator {
                     exchanges.push((
                         destination.clone(),
                         match destination == &params.executor_id {
-                            true => Ok(FlightReceiver::create(async_channel::bounded(1).1)),
+                            true => Ok(FlightReceiver::create(async_channel::unbounded().1)),
                             false => match self.fragment_exchanges.remove(&(
                                 destination.clone(),
                                 params.fragment_id,
