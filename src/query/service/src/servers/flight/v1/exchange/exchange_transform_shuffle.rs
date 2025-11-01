@@ -25,6 +25,7 @@ use databend_common_expression::local_block_meta_serde;
 use databend_common_expression::BlockMetaInfo;
 use databend_common_expression::BlockMetaInfoDowncast;
 use databend_common_expression::BlockMetaInfoPtr;
+use databend_common_expression::BlockPartitionStream;
 use databend_common_expression::DataBlock;
 use databend_common_pipeline_core::processors::Event;
 use databend_common_pipeline_core::processors::EventCause;
@@ -40,6 +41,7 @@ use super::exchange_params::ShuffleExchangeParams;
 use super::exchange_sorting::ExchangeSorting;
 use super::exchange_sorting::TransformExchangeSorting;
 use super::exchange_transform_scatter::ScatterTransform;
+use super::exchange_transform_scatter::StreamScatterTransform;
 use super::serde::ExchangeSerializeMeta;
 use crate::sessions::QueryContext;
 
@@ -383,12 +385,33 @@ pub fn exchange_shuffle(
     pipeline: &mut Pipeline,
 ) -> Result<()> {
     // append scatter transform
+    let settings = ctx.get_settings();
     pipeline.add_transform(|input, output| {
-        Ok(ScatterTransform::create(
-            input,
-            output,
-            params.shuffle_scatter.clone(),
-        ))
+        Ok(match params.shuffle_scatter.name() {
+            "Hash" => StreamScatterTransform::create(
+                input,
+                output,
+                params.destination_ids.len(),
+                params.shuffle_scatter.clone(),
+                BlockPartitionStream::create(
+                    settings.get_max_block_size()? as usize,
+                    settings.get_max_block_bytes()? as usize,
+                    params.destination_ids.len(),
+                ),
+            ),
+            "OneHashKey" => StreamScatterTransform::create(
+                input,
+                output,
+                params.destination_ids.len(),
+                params.shuffle_scatter.clone(),
+                BlockPartitionStream::create(
+                    settings.get_max_block_size()? as usize,
+                    settings.get_max_block_bytes()? as usize,
+                    params.destination_ids.len(),
+                ),
+            ),
+            _ => ScatterTransform::create(input, output, params.shuffle_scatter.clone()),
+        })
     })?;
 
     let exchange_injector = &params.exchange_injector;

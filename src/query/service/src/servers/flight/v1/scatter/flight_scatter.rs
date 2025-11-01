@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use databend_common_column::buffer::Buffer;
 use databend_common_exception::Result;
 use databend_common_expression::DataBlock;
 
@@ -19,4 +22,8 @@ pub trait FlightScatter: Sync + Send {
     fn name(&self) -> &'static str;
 
     fn execute(&self, data_block: DataBlock) -> Result<Vec<DataBlock>>;
+
+    fn partitions(&self, _data_block: &DataBlock) -> Result<Buffer<u64>> {
+        Ok(Buffer::new())
+    }
 }

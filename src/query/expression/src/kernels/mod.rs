@@ -25,6 +25,7 @@ mod take_compact;
 mod take_ranges;
 mod topk;
 mod utils;
+mod stream_partition;
 
 pub use filter::FilterVisitor;
 pub use filter::IterationStrategy;
@@ -35,3 +36,4 @@ pub use sort_compare::*;
 pub use take_chunks::*;
 pub use topk::*;
 pub use utils::*;
+pub use stream_partition::*;

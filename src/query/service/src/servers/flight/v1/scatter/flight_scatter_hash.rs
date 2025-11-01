@@ -151,6 +151,14 @@ impl FlightScatter for OneHashKeyFlightScatter {
 
         Ok(res)
     }
+
+    fn partitions(&self, data_block: &DataBlock) -> Result<Buffer<u64>> {
+        let evaluator = Evaluator::new(&data_block, &self.func_ctx, &BUILTIN_FUNCTIONS);
+        let num = data_block.num_rows();
+
+        let indices = evaluator.run(&self.indices_scalar).unwrap();
+        get_hash_values(indices, num, self.default_scatter_index)
+    }
 }
 
 impl FlightScatter for HashFlightScatter {
@@ -182,6 +190,24 @@ impl FlightScatter for HashFlightScatter {
         }
 
         Ok(res)
+    }
+
+    fn partitions(&self, data_block: &DataBlock) -> Result<Buffer<u64>> {
+        let evaluator = Evaluator::new(&data_block, &self.func_ctx, &BUILTIN_FUNCTIONS);
+        let num = data_block.num_rows();
+        let indices = if !self.hash_key.is_empty() {
+            let mut hash_keys = Vec::with_capacity(self.hash_key.len());
+            for expr in &self.hash_key {
+                let indices = evaluator.run(expr).unwrap();
+                let indices = get_hash_values(indices, num, 0)?;
+                hash_keys.push(indices)
+            }
+            self.combine_hash_keys(&hash_keys, num)
+        } else {
+            Ok(vec![0; num])
+        }?;
+
+        Ok(Buffer::from(indices))
     }
 }
 
