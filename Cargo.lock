@@ -5409,6 +5409,7 @@ dependencies = [
  "sha2",
  "socket2",
  "sqlx",
+ "strength_reduce",
  "sysinfo",
  "temp-env",
  "tempfile",
